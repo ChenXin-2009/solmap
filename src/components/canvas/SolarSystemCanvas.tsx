@@ -15,7 +15,9 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { useSolarSystemStore } from '@/lib/state';
 import type { CelestialBody } from '@/lib/astronomy/orbit';
+import type { ViewOffset } from '@/lib/state';
 import { planetNames } from '@/lib/astronomy/names';
+import { dateToJulianDay } from '@/lib/astronomy/time';
 
 /**
  * Canvas 渲染器类
@@ -63,7 +65,168 @@ class SolarSystemRenderer {
   }
 
   /**
-   * 绘制轨道
+   * 将十六进制颜色转换为RGB
+   */
+  private hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result
+      ? {
+          r: parseInt(result[1], 16),
+          g: parseInt(result[2], 16),
+          b: parseInt(result[3], 16)
+        }
+      : null;
+  }
+
+  /**
+   * 计算行星当前在轨道上的真近点角
+   */
+  private calculateTrueAnomaly(body: CelestialBody, julianDay: number): number | null {
+    if (!body.elements) return null;
+
+    const elements = body.elements;
+    const T = (julianDay - 2451545.0) / 36525.0;
+    
+    // 计算当前时刻的轨道元素
+    const a = elements.a + elements.a_dot * T;
+    const e = elements.e + elements.e_dot * T;
+    const L = elements.L + elements.L_dot * T;
+    const w_bar = elements.w_bar + elements.w_bar_dot * T;
+    const O = elements.O + elements.O_dot * T;
+    
+    // 计算平近点角
+    const w = w_bar - O;
+    let M = (L - w_bar) % (2 * Math.PI);
+    // 确保M在0到2π之间
+    if (M < 0) M += 2 * Math.PI;
+    
+    // 求解偏近点角（使用牛顿迭代法）
+    let E = M;
+    for (let i = 0; i < 20; i++) {
+      const delta = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+      E -= delta;
+      if (Math.abs(delta) < 1e-8) break;
+    }
+    
+    // 计算真近点角
+    const nu = 2 * Math.atan2(
+      Math.sqrt(1 + e) * Math.sin(E / 2),
+      Math.sqrt(1 - e) * Math.cos(E / 2)
+    );
+    
+    return nu;
+  }
+
+  /**
+   * 绘制渐变轨道（从行星当前位置沿运动方向渐变）
+   */
+  drawGradientOrbit(
+    body: CelestialBody,
+    viewOffsetX: number,
+    viewOffsetY: number,
+    zoom: number,
+    julianDay: number
+  ): void {
+    if (!body.elements || body.isSun) return;
+
+    const elements = body.elements;
+    const steps = 360; // 增加精度以获得更平滑的渐变
+    
+    // 计算当前真近点角
+    const currentNu = this.calculateTrueAnomaly(body, julianDay);
+    if (currentNu === null) return;
+
+    // 计算轨道参数
+    const T = (julianDay - 2451545.0) / 36525.0;
+    const a = elements.a + elements.a_dot * T;
+    const e = elements.e + elements.e_dot * T;
+    const w = (elements.w_bar + elements.w_bar_dot * T) - (elements.O + elements.O_dot * T);
+    const O = elements.O + elements.O_dot * T;
+    const i = elements.i + elements.i_dot * T;
+
+    // 解析颜色
+    const rgb = this.hexToRgb(body.color);
+    if (!rgb) return;
+
+    // 计算轨道上的点，从当前位置开始，沿着运动方向
+    // 运动方向是角度增加的方向
+    const startAngle = currentNu;
+    const trailLength = Math.PI * 2; // 显示一圈轨道
+    
+    this.ctx.save();
+    this.ctx.lineCap = 'round';
+    this.ctx.lineJoin = 'round';
+
+    // 分段绘制，每段使用不同的透明度
+    const segmentCount = 200; // 分段数量，越多渐变越平滑
+    for (let seg = 0; seg < segmentCount; seg++) {
+      const progress = seg / segmentCount; // 0 到 1
+      const angleOffset = progress * trailLength;
+      const angle = startAngle + angleOffset;
+      
+      // 计算轨道半径
+      const r = a * (1 - e * e) / (1 + e * Math.cos(angle));
+      
+      // 转换到黄道坐标系
+      const x_orb = r * Math.cos(angle);
+      const y_orb = r * Math.sin(angle);
+      
+      const cos_w = Math.cos(w);
+      const sin_w = Math.sin(w);
+      const cos_O = Math.cos(O);
+      const sin_O = Math.sin(O);
+      const cos_i = Math.cos(i);
+      const sin_i = Math.sin(i);
+      
+      const x = (cos_w * cos_O - sin_w * sin_O * cos_i) * x_orb +
+                (-sin_w * cos_O - cos_w * sin_O * cos_i) * y_orb;
+      const y = (cos_w * sin_O + sin_w * cos_O * cos_i) * x_orb +
+                (-sin_w * sin_O + cos_w * cos_O * cos_i) * y_orb;
+      
+      const screenX = this.centerX + (x + viewOffsetX) * zoom;
+      const screenY = this.centerY + (y + viewOffsetY) * zoom;
+      
+      // 计算下一段的点
+      const nextProgress = (seg + 1) / segmentCount;
+      const nextAngleOffset = nextProgress * trailLength;
+      const nextAngle = startAngle + nextAngleOffset;
+      const nextR = a * (1 - e * e) / (1 + e * Math.cos(nextAngle));
+      const nextX_orb = nextR * Math.cos(nextAngle);
+      const nextY_orb = nextR * Math.sin(nextAngle);
+      
+      const nextX = (cos_w * cos_O - sin_w * sin_O * cos_i) * nextX_orb +
+                    (-sin_w * cos_O - cos_w * sin_O * cos_i) * nextY_orb;
+      const nextY = (cos_w * sin_O + sin_w * cos_O * cos_i) * nextX_orb +
+                    (-sin_w * sin_O + cos_w * cos_O * cos_i) * nextY_orb;
+      
+      const nextScreenX = this.centerX + (nextX + viewOffsetX) * zoom;
+      const nextScreenY = this.centerY + (nextY + viewOffsetY) * zoom;
+      
+      // 渐变透明度：从当前位置（较不透明）到轨道末端（最低透明度）
+      // 设置最低透明度，确保轨道始终可见
+      const minOpacity = 0.15; // 最低透明度（15%）
+      const maxOpacity = 0.8; // 最大透明度（80%）
+      // 从maxOpacity渐变到minOpacity，使用平滑曲线
+      const opacity = Math.max(minOpacity, maxOpacity * (1 - progress * 0.85));
+      
+      // 渐变线宽：从粗到细，但保持最小线宽
+      const minLineWidth = 1;
+      const maxLineWidth = 3;
+      const lineWidth = Math.max(minLineWidth, maxLineWidth * (1 - progress * 0.6));
+      
+      this.ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacity})`;
+      this.ctx.lineWidth = lineWidth;
+      this.ctx.beginPath();
+      this.ctx.moveTo(screenX, screenY);
+      this.ctx.lineTo(nextScreenX, nextScreenY);
+      this.ctx.stroke();
+    }
+
+    this.ctx.restore();
+  }
+
+  /**
+   * 绘制轨道（传统方式，用于对比或未选中时）
    */
   drawOrbit(
     body: CelestialBody,
@@ -202,19 +365,28 @@ class SolarSystemRenderer {
     viewOffsetX: number,
     viewOffsetY: number,
     zoom: number,
-    lang: string
+    lang: string,
+    currentJulianDay?: number
   ): void {
     this.clearCanvas();
     this.drawStarfield();
 
     this.ctx.save();
 
-    // 绘制轨道
-    bodies.forEach((body) => {
-      if (body.isSun) return;
-      const isSelected = body.name === selectedPlanet;
-      this.drawOrbit(body, viewOffsetX, viewOffsetY, zoom, isSelected);
-    });
+    // 绘制渐变轨道（从行星当前位置沿运动方向）
+    if (currentJulianDay !== undefined) {
+      bodies.forEach((body) => {
+        if (body.isSun) return;
+        this.drawGradientOrbit(body, viewOffsetX, viewOffsetY, zoom, currentJulianDay);
+      });
+    } else {
+      // 如果没有儒略日，使用传统轨道绘制
+      bodies.forEach((body) => {
+        if (body.isSun) return;
+        const isSelected = body.name === selectedPlanet;
+        this.drawOrbit(body, viewOffsetX, viewOffsetY, zoom, isSelected);
+      });
+    }
 
     // 绘制天体
     const sortedBodies = [...bodies].sort((a, b) => {
@@ -246,12 +418,20 @@ export default function SolarSystemCanvas() {
   const dragStartRef = useRef({ x: 0, y: 0 });
   const lastPosRef = useRef({ x: 0, y: 0 });
 
+  // 多点触摸缩放状态
+  const initialPinchDistanceRef = useRef<number | null>(null);
+  const initialZoomRef = useRef<number | null>(null);
+  const initialViewOffsetRef = useRef<ViewOffset | null>(null);
+  const pinchCenterRef = useRef<{ x: number; y: number } | null>(null);
+
+
   const {
     celestialBodies,
     selectedPlanet,
     viewOffset,
     zoom,
     lang,
+    currentTime,
     tick,
     setViewOffset,
     setZoom,
@@ -263,15 +443,41 @@ export default function SolarSystemCanvas() {
   const MIN_ZOOM = 10;
   const MAX_ZOOM = 500; // 修改上限
 
+  // 计算两点之间的距离
+  const getDistance = (touch1: React.Touch, touch2: React.Touch): number => {
+    const dx = touch1.clientX - touch2.clientX;
+    const dy = touch1.clientY - touch2.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  // 获取两点中心坐标
+  const getCenter = (touch1: React.Touch, touch2: React.Touch): { x: number; y: number } => {
+    return {
+      x: (touch1.clientX + touch2.clientX) / 2,
+      y: (touch1.clientY + touch2.clientY) / 2
+    };
+  };
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // 获取当前儒略日
+    const currentJulianDay = dateToJulianDay(currentTime);
+
     const renderer = new SolarSystemRenderer(ctx, canvas.width, canvas.height);
-    renderer.render(celestialBodies, selectedPlanet, viewOffset.x, viewOffset.y, zoom, lang);
-  }, [celestialBodies, selectedPlanet, viewOffset, zoom, lang]);
+    renderer.render(
+      celestialBodies, 
+      selectedPlanet, 
+      viewOffset.x, 
+      viewOffset.y, 
+      zoom, 
+      lang, 
+      currentJulianDay
+    );
+  }, [celestialBodies, selectedPlanet, viewOffset, zoom, lang, currentTime]);
 
   useEffect(() => {
     const animate = () => {
@@ -379,20 +585,75 @@ export default function SolarSystemCanvas() {
     setZoom(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * zoomFactor)));
   };
 
-  // 触摸逻辑保持不变
+  // 触摸逻辑
   const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
-    if (e.touches.length === 1) {
+    if (e.touches.length === 2) {
+      // 两点触摸 - 开始缩放
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      initialPinchDistanceRef.current = getDistance(touch1, touch2);
+      initialZoomRef.current = zoom;
+      initialViewOffsetRef.current = { ...viewOffset }; // 保存初始视图偏移
+      pinchCenterRef.current = getCenter(touch1, touch2);
+      isMouseDownRef.current = false; // 禁用单点拖拽
+      isDraggingRef.current = false;
+    } else if (e.touches.length === 1) {
+      // 单点触摸 - 开始拖拽
       const touch = e.touches[0];
       isMouseDownRef.current = true;
       isDraggingRef.current = false;
       dragStartRef.current = { x: touch.clientX, y: touch.clientY };
       lastPosRef.current = { x: touch.clientX, y: touch.clientY };
+      // 重置缩放状态
+      initialPinchDistanceRef.current = null;
+      initialZoomRef.current = null;
+      initialViewOffsetRef.current = null;
+      pinchCenterRef.current = null;
     }
   };
 
   const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    if (e.touches.length === 1 && isMouseDownRef.current) {
+    
+    if (e.touches.length === 2) {
+      // 两点触摸 - 缩放
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const currentDistance = getDistance(touch1, touch2);
+      const currentCenter = getCenter(touch1, touch2);
+
+      if (
+        initialPinchDistanceRef.current !== null && 
+        initialZoomRef.current !== null && 
+        initialViewOffsetRef.current !== null &&
+        pinchCenterRef.current !== null
+      ) {
+        // 计算缩放比例
+        const scale = currentDistance / initialPinchDistanceRef.current;
+        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, initialZoomRef.current * scale));
+
+        // 计算缩放中心在画布坐标系中的位置（相对于画布中心）
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const rect = canvas.getBoundingClientRect();
+          // 初始触摸中心相对于画布中心的位置（这是缩放中心）
+          const initialScreenX = pinchCenterRef.current.x - rect.left - canvas.width / 2;
+          const initialScreenY = pinchCenterRef.current.y - rect.top - canvas.height / 2;
+
+          // 使用初始视图偏移计算初始缩放中心在世界坐标系中的位置
+          const worldX = (initialScreenX / initialZoomRef.current) - initialViewOffsetRef.current.x;
+          const worldY = (initialScreenY / initialZoomRef.current) - initialViewOffsetRef.current.y;
+
+          // 应用新缩放后，调整视图偏移以保持该世界坐标点在屏幕上的位置不变
+          const newOffsetX = (initialScreenX / newZoom) - worldX;
+          const newOffsetY = (initialScreenY / newZoom) - worldY;
+
+          setZoom(newZoom);
+          setViewOffset({ x: newOffsetX, y: newOffsetY });
+        }
+      }
+    } else if (e.touches.length === 1 && isMouseDownRef.current) {
+      // 单点触摸 - 拖拽
       const touch = e.touches[0];
       if (!isDraggingRef.current) {
         const dx = touch.clientX - dragStartRef.current.x;
@@ -407,9 +668,29 @@ export default function SolarSystemCanvas() {
     }
   };
 
-  const handleTouchEnd = () => {
-    isMouseDownRef.current = false;
-    isDraggingRef.current = false;
+  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    // 如果还有触摸点，检查是单点还是两点
+    if (e.touches.length === 1) {
+      // 从两点变为单点，切换到单点拖拽模式
+      const touch = e.touches[0];
+      isMouseDownRef.current = true;
+      isDraggingRef.current = false;
+      dragStartRef.current = { x: touch.clientX, y: touch.clientY };
+      lastPosRef.current = { x: touch.clientX, y: touch.clientY };
+      // 重置缩放状态
+      initialPinchDistanceRef.current = null;
+      initialZoomRef.current = null;
+      initialViewOffsetRef.current = null;
+      pinchCenterRef.current = null;
+    } else if (e.touches.length === 0) {
+      // 所有触摸点都离开
+      isMouseDownRef.current = false;
+      isDraggingRef.current = false;
+      initialPinchDistanceRef.current = null;
+      initialZoomRef.current = null;
+      initialViewOffsetRef.current = null;
+      pinchCenterRef.current = null;
+    }
   };
 
   return (
