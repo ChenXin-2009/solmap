@@ -176,9 +176,11 @@ class SolarSystemRenderer {
     const sin_i = Math.sin(i);
     
     // 先计算所有轨道点
+    // 调转渐变方向：从当前位置开始，沿着运动方向绘制
     const points: Array<{ x: number; y: number }> = [];
     for (let seg = 0; seg <= segmentCount; seg++) {
       const progress = seg / segmentCount;
+      // 沿着运动方向绘制
       const angleOffset = progress * trailLength;
       const angle = startAngle + angleOffset;
       
@@ -214,12 +216,14 @@ class SolarSystemRenderer {
       if (startIdx >= endIdx) continue;
       
       // 计算这段的平均进度（使用中点）
+      // 调转渐变方向：从行星位置开始，沿着运动方向，轨道逐渐变不透明（而不是变透明）
       const midIdx = Math.floor((startIdx + endIdx) / 2);
       const progress = midIdx / (points.length - 1);
-      const opacity = Math.max(minOpacity, maxOpacity * (1 - progress * 0.85));
+      // 反转透明度计算：progress = 0 时（靠近行星）最透明，progress = 1 时（远离行星）最不透明
+      const opacity = minOpacity + (maxOpacity - minOpacity) * progress;
       const minLineWidth = 1;
       const maxLineWidth = 3;
-      const lineWidth = Math.max(minLineWidth, maxLineWidth * (1 - progress * 0.6));
+      const lineWidth = minLineWidth + (maxLineWidth - minLineWidth) * progress;
       
       // 绘制这一段（使用连续路径，避免小点）
       this.ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacity})`;
@@ -484,20 +488,33 @@ export default function SolarSystemCanvas() {
     };
   };
 
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  // 使用 useRef 存储绘制函数，确保引用稳定
+  const drawRef = useRef<() => void>(() => {});
 
-    // 获取当前儒略日
-    const currentJulianDay = dateToJulianDay(currentTime);
+  // 初始化绘制函数
+  useEffect(() => {
+    drawRef.current = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    // 使用平滑后的缩放值
-    const currentZoom = smoothZoomRef.current;
-    const renderer = new SolarSystemRenderer(ctx, canvas.width, canvas.height);
-    renderer.render(celestialBodies, selectedPlanet, viewOffset.x, viewOffset.y, currentZoom, lang, currentJulianDay);
-  }, [celestialBodies, selectedPlanet, viewOffset, lang, currentTime]);
+      // 直接获取 store 的最新状态
+      const state = useSolarSystemStore.getState();
+      const currentJulianDay = dateToJulianDay(state.currentTime);
+      const currentZoom = smoothZoomRef.current;
+      const renderer = new SolarSystemRenderer(ctx, canvas.width, canvas.height);
+      renderer.render(
+        state.celestialBodies,
+        state.selectedPlanet,
+        state.viewOffset.x,
+        state.viewOffset.y,
+        currentZoom,
+        state.lang,
+        currentJulianDay
+      );
+    };
+  }); // 每次渲染后更新绘制函数，但不作为依赖
 
   useEffect(() => {
     const animate = () => {
@@ -518,8 +535,12 @@ export default function SolarSystemCanvas() {
         smoothZoomRef.current = target;
       }
 
-      tick(delta);
-      draw();
+      // 在动画循环内部直接访问 store 的最新值，避免依赖数组导致的无限循环
+      const state = useSolarSystemStore.getState();
+      state.tick(delta);
+
+      // 绘制
+      drawRef.current();
 
       animationRef.current = requestAnimationFrame(animate);
     };
@@ -528,20 +549,35 @@ export default function SolarSystemCanvas() {
     return () => {
       if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
     };
-  }, [tick, draw]);
+  }, []); // 空依赖数组，只在组件挂载时运行一次
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      draw();
+      // 使用容器的实际尺寸
+      const container = canvas.parentElement;
+      if (container) {
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+      } else {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      drawRef.current();
     };
     resize();
     window.addEventListener('resize', resize);
-    return () => window.removeEventListener('resize', resize);
-  }, [draw]);
+    // 使用 ResizeObserver 监听容器尺寸变化
+    const resizeObserver = new ResizeObserver(resize);
+    if (canvas.parentElement) {
+      resizeObserver.observe(canvas.parentElement);
+    }
+    return () => {
+      window.removeEventListener('resize', resize);
+      resizeObserver.disconnect();
+    };
+  }, []); // 空依赖数组，drawRef.current 始终是最新的
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     isMouseDownRef.current = true;
@@ -748,6 +784,8 @@ export default function SolarSystemCanvas() {
       onTouchEnd={handleTouchEnd}
       style={{
         display: 'block',
+        width: '100%',
+        height: '100%',
         cursor: isDraggingRef.current ? 'grabbing' : 'grab',
         touchAction: 'none'
       }}
