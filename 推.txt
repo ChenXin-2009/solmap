@@ -9,7 +9,7 @@ git checkout main
 git pull origin main
 
 git add .
-git commit -m "Release 1.1.0: 更新说明"
-git tag v1.1.0
+git commit -m "Release 2.0.0: 更新了3D模式的基础功能"
+git tag v2.0.0
 git push origin main
-git push origin v1.1.0
+git push origin v2.0.0
