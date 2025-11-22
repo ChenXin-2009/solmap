@@ -28,6 +28,7 @@ export interface SolarSystemState {
   currentTime: Date;
   isPlaying: boolean;
   timeSpeed: number;
+  playDirection: 'forward' | 'backward'; // 播放方向
   
   // ========== 天体数据 ==========
   celestialBodies: CelestialBody[];
@@ -45,6 +46,8 @@ export interface SolarSystemState {
   setCurrentTime: (date: Date) => void;
   togglePlayPause: () => void;
   setTimeSpeed: (speed: number) => void;
+  setPlayDirection: (direction: 'forward' | 'backward') => void;
+  startPlaying: (speed: number, direction: 'forward' | 'backward') => void;
   tick: (deltaSeconds: number) => void;
   selectPlanet: (name: string | null) => void;
   setViewOffset: (offset: ViewOffset) => void;
@@ -71,8 +74,9 @@ export const useSolarSystemStore = create<SolarSystemState>((set, get) => {
   return {
     // ========== 初始状态 ==========
     currentTime: initialTime,
-    isPlaying: false,
-    timeSpeed: 1,
+    isPlaying: true, // 默认开始播放
+    timeSpeed: 1 / 86400, // 默认实时播放：每秒前进1秒 = 1/86400天
+    playDirection: 'forward',
     celestialBodies: getCelestialBodies(initialJD),
     selectedPlanet: null,
     viewOffset: { x: 0, y: 0 },
@@ -94,15 +98,38 @@ export const useSolarSystemStore = create<SolarSystemState>((set, get) => {
     },
     
     setTimeSpeed: (speed: number) => {
-      const clampedSpeed = Math.max(0.1, Math.min(1000, speed));
+      // 确保速度在合理范围（以天为单位）
+      const clampedSpeed = Math.max(0.1, Math.min(365, speed)); // 最大速度限制为1年/秒（365天）
       set({ timeSpeed: clampedSpeed });
+    },
+    
+    setPlayDirection: (direction: 'forward' | 'backward') => {
+      set({ playDirection: direction });
+    },
+    
+    startPlaying: (speed: number, direction: 'forward' | 'backward') => {
+      // 确保速度在合理范围（以天为单位）
+      const clampedSpeed = Math.max(0.1, Math.min(365, speed)); // 最大速度限制为1年/秒（365天）
+      set({ timeSpeed: clampedSpeed, playDirection: direction, isPlaying: true });
     },
     
     tick: (deltaSeconds: number) => {
       const state = get();
       if (!state.isPlaying) return;
-      const deltaDays = deltaSeconds * state.timeSpeed;
-      const newTime = new Date(state.currentTime.getTime() + deltaDays * 86400000);
+      // timeSpeed 表示每秒前进多少天
+      // 例如 timeSpeed = 1 表示每秒前进 1 天
+      // timeSpeed = 30 表示每秒前进 30 天（约1个月）
+      // timeSpeed = 365 表示每秒前进 365 天（1年）
+      // 计算时间增量：deltaSeconds 是经过的秒数，timeSpeed 是每秒前进多少天
+      // 所以总前进时间 = deltaSeconds * timeSpeed（天）
+      const direction = state.playDirection === 'forward' ? 1 : -1;
+      const deltaTimeDays = deltaSeconds * state.timeSpeed * direction;
+      
+      // 使用毫秒计算，参考 TimeControl.txt 中的方式
+      // 将天数转换为毫秒：1天 = 24 * 60 * 60 * 1000 毫秒
+      const deltaTimeMs = deltaTimeDays * 24 * 60 * 60 * 1000;
+      const newTime = new Date(state.currentTime.getTime() + deltaTimeMs);
+      
       state.setCurrentTime(newTime);
     },
     

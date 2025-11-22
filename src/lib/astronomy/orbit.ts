@@ -365,19 +365,7 @@ export function getCelestialBodies(julianDay: number): CelestialBody[] {
     }
   }
   
-  // 月球
-  if (earthPos) {
-    const moonPos = calculateMoonPosition(earthPos, julianDay);
-    bodies.push({
-      name: 'Moon',
-      x: moonPos.x,
-      y: moonPos.y,
-      z: moonPos.z,
-      r: moonPos.r,
-      radius: 0.002,
-      color: '#C0C0C0'
-    });
-  }
+  // 月球已移除，不再显示
   
   return bodies;
 }

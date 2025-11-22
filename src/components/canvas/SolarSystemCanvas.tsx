@@ -20,17 +20,81 @@ import { planetNames } from '@/lib/astronomy/names';
 import { dateToJulianDay } from '@/lib/astronomy/time';
 
 /**
+ * ============================================================================
+ * 可调整参数配置（方便调试）
+ * ============================================================================
+ */
+const ORBIT_CONFIG = {
+  // 轨道颜色（十六进制，每个行星可以单独设置）
+  colors: {
+    mercury: '#c4cbcf',
+    venus: '#fcc307',
+    earth: '#22a2c3',
+    mars: '#f5391c',
+    jupiter: '#aa6a4c',
+    saturn: '#be7e4a',
+    uranus: '#4FD0E7',
+    neptune: '#4B70DD',
+  },
+  // 轨道线宽
+  minLineWidth: 1,      // 最小线宽（像素）
+  maxLineWidth: 1,      // 最大线宽（像素）
+  // 轨道透明度
+  minOpacity: 0.2,     // 最低透明度（0-1）
+  maxOpacity: 0.8,      // 最大透明度（0-1）
+  // 轨道分段
+  baseSegmentCount: 300, // 基础分段数量
+  segmentSize: 20,      // 每段包含的点数
+  overlap: 0,          // 段之间的重叠点数
+};
+
+/**
+ * 文字标签配置
+ */
+const LABEL_CONFIG = {
+  // 字体设置
+  fontSize: 16,        // 字体大小（像素）
+  fontFamily: '"SmileySans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+  fontWeight: 'bold',  // 字体粗细
+  
+  // 文字位置
+  offsetY: 8,          // 文字距离行星的垂直偏移（像素）
+  
+  // 重叠检测
+  charWidth: 10,      // 每个字符的估算宽度（像素，用于重叠检测）
+  charHeight: 20,      // 文字高度（像素，用于重叠检测）
+  overlapPadding: 2,   // 重叠检测的额外边距（像素）
+  
+  // 渐隐效果
+  fadeSpeed: 0.2,     // 渐隐速度（0-1，值越大变化越快，建议 0.1-0.3）
+  minOpacity: 0.01,    // 最小透明度（低于此值不绘制）
+  
+  // 显示条件
+  minZoomToShow: 10,   // 最小缩放级别（低于此值不显示任何标签，除了选中的）
+};
+
+/**
  * Canvas 渲染器类
  */
 class SolarSystemRenderer {
   private ctx: CanvasRenderingContext2D;
-  private width: number;
-  private height: number;
+  public width: number;  // 改为 public，方便外部检查
+  public height: number; // 改为 public，方便外部检查
   private centerX: number;
   private centerY: number;
+  // 存储标签透明度状态，用于平滑渐隐
+  private labelStates: Map<string, { opacity: number; targetOpacity: number }> = new Map();
 
   constructor(ctx: CanvasRenderingContext2D, width: number, height: number) {
     this.ctx = ctx;
+    this.width = width;
+    this.height = height;
+    this.centerX = width / 2;
+    this.centerY = height / 2;
+  }
+  
+  // 更新尺寸（当窗口大小改变时）
+  updateSize(width: number, height: number): void {
     this.width = width;
     this.height = height;
     this.centerX = width / 2;
@@ -143,8 +207,9 @@ class SolarSystemRenderer {
     const O = elements.O + elements.O_dot * T;
     const i = elements.i + elements.i_dot * T;
 
-    // 解析颜色
-    const rgb = this.hexToRgb(body.color);
+    // 解析颜色（优先使用配置中的颜色，如果没有则使用 body.color）
+    const orbitColor = ORBIT_CONFIG.colors[body.name.toLowerCase() as keyof typeof ORBIT_CONFIG.colors] || body.color;
+    const rgb = this.hexToRgb(orbitColor);
     if (!rgb) return;
 
     // 计算轨道上的点，从当前位置开始，沿着运动方向
@@ -154,18 +219,22 @@ class SolarSystemRenderer {
     this.ctx.save();
     this.ctx.lineCap = 'round';
     this.ctx.lineJoin = 'round';
-    // 启用抗锯齿，使线条更平滑
+    // 启用抗锯齿，使线条更平滑清晰
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = 'high';
+    // 确保线段之间没有间隙
+    this.ctx.miterLimit = 10;
+    // 使用 source-over 混合模式，确保轨道完全覆盖背景
+    this.ctx.globalCompositeOperation = 'source-over';
 
-    // 使用更高效的方式：减少分段数量，使用更平滑的渐变
-    // 根据缩放级别动态调整分段数量，平衡性能和质量
-    const baseSegmentCount = 150; // 基础分段数量（减少以提高性能）
-    const segmentCount = Math.min(baseSegmentCount, Math.max(80, Math.floor(baseSegmentCount * (zoom / 50))));
+    // 增加分段数量，消除纹理感，使用更平滑的绘制
+    // 根据缩放级别动态调整分段数量，确保轨道平滑
+    const baseSegmentCount = ORBIT_CONFIG.baseSegmentCount;
+    const segmentCount = Math.min(baseSegmentCount, Math.max(150, Math.floor(baseSegmentCount * (zoom / 50))));
     
-    // 渐变透明度参数
-    const minOpacity = 0.15; // 最低透明度（15%）
-    const maxOpacity = 0.8; // 最大透明度（80%）
+    // 渐变透明度参数（从配置读取）
+    const minOpacity = ORBIT_CONFIG.minOpacity;
+    const maxOpacity = ORBIT_CONFIG.maxOpacity;
     
     // 预计算三角函数值以提高性能
     const cos_w = Math.cos(w);
@@ -202,40 +271,40 @@ class SolarSystemRenderer {
       points.push({ x: screenX, y: screenY });
     }
     
-    // 使用更少的绘制调用，将相近透明度的段合并
-    // 减少绘制调用次数以提高性能，同时保持平滑渐变
-    const gradientSteps = 50; // 渐变步数（减少绘制调用）
-    const stepSize = (points.length - 1) / gradientSteps;
+    // 使用更平滑的渐变绘制，使用单一路径分段设置样式，完全避免白点
+    const minLineWidth = ORBIT_CONFIG.minLineWidth;
+    const maxLineWidth = ORBIT_CONFIG.maxLineWidth;
     
-    for (let step = 0; step < gradientSteps; step++) {
-      // 让每段之间有轻微重叠，避免间隙
-      const overlap = 2; // 重叠点数
-      const startIdx = Math.max(0, Math.floor(step * stepSize) - (step > 0 ? overlap : 0));
-      const endIdx = Math.min(points.length - 1, Math.floor((step + 1) * stepSize) + (step < gradientSteps - 1 ? overlap : 0));
+    // 使用更大的段，减少绘制调用，同时保持平滑
+    // 段之间重叠以确保完全连续，避免白点
+    const segmentSize = ORBIT_CONFIG.segmentSize;
+    const overlap = ORBIT_CONFIG.overlap;
+    
+    for (let i = 0; i < points.length - 1; i += segmentSize - overlap) {
+      const endIdx = Math.min(i + segmentSize, points.length - 1);
       
-      if (startIdx >= endIdx) continue;
-      
-      // 计算这段的平均进度（使用中点）
-      // 调转渐变方向：从行星位置开始，沿着运动方向，轨道逐渐变不透明（而不是变透明）
-      const midIdx = Math.floor((startIdx + endIdx) / 2);
+      // 计算这段的中间点进度
+      const midIdx = Math.floor((i + endIdx) / 2);
       const progress = midIdx / (points.length - 1);
-      // 反转透明度计算：progress = 0 时（靠近行星）最透明，progress = 1 时（远离行星）最不透明
+      
       const opacity = minOpacity + (maxOpacity - minOpacity) * progress;
-      const minLineWidth = 1;
-      const maxLineWidth = 3;
       const lineWidth = minLineWidth + (maxLineWidth - minLineWidth) * progress;
       
-      // 绘制这一段（使用连续路径，避免小点）
+      // 使用连续路径绘制这一段
       this.ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacity})`;
       this.ctx.lineWidth = lineWidth;
       this.ctx.beginPath();
-      this.ctx.moveTo(points[startIdx].x, points[startIdx].y);
+      this.ctx.moveTo(points[i].x, points[i].y);
       
-      for (let i = startIdx + 1; i <= endIdx; i++) {
-        this.ctx.lineTo(points[i].x, points[i].y);
+      // 绘制连续路径，确保线段之间没有间隙
+      for (let j = i + 1; j <= endIdx; j++) {
+        this.ctx.lineTo(points[j].x, points[j].y);
       }
       
       this.ctx.stroke();
+      
+      // 如果已经到达末尾，退出循环
+      if (endIdx >= points.length - 1) break;
     }
 
     this.ctx.restore();
@@ -292,35 +361,33 @@ class SolarSystemRenderer {
     viewOffsetY: number,
     zoom: number,
     isSelected: boolean,
-    lang: string
+    lang: string,
+    labelOpacity: number = 1.0
   ): void {
     const x = this.centerX + (body.x + viewOffsetX) * zoom;
     const y = this.centerY + (body.y + viewOffsetY) * zoom;
     // 保留真实比例，如果太小加最小可视半径
     const radius = Math.max(body.radius * zoom, body.isSun ? 8 : 3);
 
-    // 太阳光晕
+    // 选中时的扁平化标记（可选：简单的边框或外圈）
     if (isSelected && !body.isSun) {
-      const gradient = this.ctx.createRadialGradient(x, y, radius, x, y, radius * 3);
-      gradient.addColorStop(0, body.color + '60');
-      gradient.addColorStop(1, 'transparent');
-      this.ctx.fillStyle = gradient;
+      // 扁平化设计：使用简单的边框而不是渐变光晕
+      this.ctx.strokeStyle = body.color;
+      this.ctx.lineWidth = 2;
       this.ctx.beginPath();
-      this.ctx.arc(x, y, radius * 3, 0, 2 * Math.PI);
-      this.ctx.fill();
+      this.ctx.arc(x, y, radius + 3, 0, 2 * Math.PI);
+      this.ctx.stroke();
     }
 
-    // 天体本体
+    // 天体本体 - 扁平化设计，无渐变
     if (body.isSun) {
-      const gradient = this.ctx.createRadialGradient(x, y, 0, x, y, radius * 1.5);
-      gradient.addColorStop(0, '#FFFFFF');
-      gradient.addColorStop(0.4, body.color);
-      gradient.addColorStop(1, '#FFA500');
-      this.ctx.fillStyle = gradient;
+      // 太阳使用纯色，无渐变
+      this.ctx.fillStyle = body.color;
       this.ctx.beginPath();
-      this.ctx.arc(x, y, radius * 1.5, 0, 2 * Math.PI);
+      this.ctx.arc(x, y, radius, 0, 2 * Math.PI);
       this.ctx.fill();
     } else {
+      // 行星使用纯色，无渐变和高光
       this.ctx.fillStyle = body.color;
       this.ctx.beginPath();
       this.ctx.arc(x, y, radius, 0, 2 * Math.PI);
@@ -334,42 +401,63 @@ class SolarSystemRenderer {
         this.ctx.arc(x, y, 4, 0, 2 * Math.PI);
         this.ctx.stroke();
       }
-
-      // 高光
-      const highlight = this.ctx.createRadialGradient(
-        x - radius * 0.3,
-        y - radius * 0.3,
-        0,
-        x,
-        y,
-        radius
-      );
-      highlight.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
-      highlight.addColorStop(1, 'transparent');
-      this.ctx.fillStyle = highlight;
-      this.ctx.beginPath();
-      this.ctx.arc(x, y, radius, 0, 2 * Math.PI);
-      this.ctx.fill();
     }
 
-    // 标签显示逻辑
-    const shouldShowLabel = body.isSun || isSelected || zoom > 30;
-    if (shouldShowLabel) {
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 13px sans-serif';
+    // 标签显示逻辑 - 太阳不显示文字
+    if (body.isSun) {
+      return; // 太阳不显示标签
+    }
+    
+    // 使用传入的透明度（由 render 方法根据重叠情况计算）
+    if (labelOpacity > LABEL_CONFIG.minOpacity) {
+      // 优化字体渲染，确保清晰
+      this.ctx.imageSmoothingEnabled = true;
+      this.ctx.imageSmoothingQuality = 'high';
+      this.ctx.fillStyle = `rgba(255, 255, 255, ${labelOpacity})`;
+      // 使用配置的字体设置
+      this.ctx.font = `${LABEL_CONFIG.fontWeight} ${LABEL_CONFIG.fontSize}px ${LABEL_CONFIG.fontFamily}`;
       this.ctx.textAlign = 'center';
       this.ctx.textBaseline = 'top';
-      this.ctx.shadowColor = 'rgba(0,0,0,0.8)';
-      this.ctx.shadowBlur = 4;
+      // 使用更清晰的文字阴影
+      this.ctx.shadowColor = `rgba(0,0,0,${0.8 * labelOpacity})`;
+      this.ctx.shadowBlur = 3;
       this.ctx.shadowOffsetX = 0;
       this.ctx.shadowOffsetY = 0;
 
       const displayName = planetNames[lang as 'en' | 'zh'][body.name] ?? body.name;
-      this.ctx.fillText(displayName, x, y + radius + 8);
+      this.ctx.fillText(displayName, x, y + radius + LABEL_CONFIG.offsetY);
 
       this.ctx.shadowColor = 'transparent';
       this.ctx.shadowBlur = 0;
     }
+  }
+
+  /**
+   * 检测两个文字标签是否重叠
+   */
+  private checkLabelOverlap(
+    x1: number, y1: number, text1: string,
+    x2: number, y2: number, text2: string
+  ): boolean {
+    // 估算文字尺寸（使用配置参数）
+    const textWidth1 = text1.length * LABEL_CONFIG.charWidth;
+    const textWidth2 = text2.length * LABEL_CONFIG.charWidth;
+    const textHeight = LABEL_CONFIG.charHeight;
+    const padding = LABEL_CONFIG.overlapPadding;
+    
+    // 计算两个标签的边界框（添加边距）
+    const left1 = x1 - textWidth1 / 2 - padding;
+    const right1 = x1 + textWidth1 / 2 + padding;
+    const top1 = y1 - padding;
+    const bottom1 = y1 + textHeight + padding;
+    
+    const left2 = x2 - textWidth2 / 2 - padding;
+    const right2 = x2 + textWidth2 / 2 + padding;
+    const top2 = y2 - padding;
+    const bottom2 = y2 + textHeight + padding;
+    
+    // 检测边界框是否重叠
+    return !(right1 < left2 || left1 > right2 || bottom1 < top2 || top1 > bottom2);
   }
 
   /**
@@ -411,9 +499,103 @@ class SolarSystemRenderer {
       return a.r - b.r;
     });
 
+    // 先收集所有需要显示的文字标签信息
+    const labelInfos: Array<{
+      body: CelestialBody;
+      x: number;
+      y: number;
+      text: string;
+      isSelected: boolean;
+    }> = [];
+
+    sortedBodies.forEach((body) => {
+      if (body.isSun) return; // 太阳不显示标签
+      
+      const isSelected = body.name === selectedPlanet;
+      const x = this.centerX + (body.x + viewOffsetX) * zoom;
+      const y = this.centerY + (body.y + viewOffsetY) * zoom;
+      const radius = Math.max(body.radius * zoom, body.isSun ? 8 : 3);
+      const displayName = planetNames[lang as 'en' | 'zh'][body.name] ?? body.name;
+      
+      // 如果缩放太小，只显示选中的行星标签
+      if (zoom < LABEL_CONFIG.minZoomToShow && !isSelected) {
+        // 不添加到 labelInfos，这样就不会显示
+        return;
+      }
+      
+      // 选中的行星始终显示
+      if (isSelected) {
+        labelInfos.push({ body, x, y: y + radius + LABEL_CONFIG.offsetY, text: displayName, isSelected: true });
+      } else {
+        // 其他行星根据重叠情况决定是否显示
+        labelInfos.push({ body, x, y: y + radius + LABEL_CONFIG.offsetY, text: displayName, isSelected: false });
+      }
+    });
+
+    // 初始化状态（如果不存在）
+    labelInfos.forEach((info) => {
+      if (!this.labelStates.has(info.body.name)) {
+        this.labelStates.set(info.body.name, { opacity: 1.0, targetOpacity: 1.0 });
+      }
+    });
+
+    // 检测重叠并设置目标透明度
+    for (let i = 0; i < labelInfos.length; i++) {
+      const info1 = labelInfos[i];
+      if (info1.isSelected) {
+        this.labelStates.get(info1.body.name)!.targetOpacity = 1.0;
+        continue;
+      }
+      
+      let hasOverlap = false;
+      // 检查与所有其他标签的重叠（包括已处理的标签）
+      for (let j = 0; j < labelInfos.length; j++) {
+        if (i === j) continue;
+        const info2 = labelInfos[j];
+        if (this.checkLabelOverlap(info1.x, info1.y, info1.text, info2.x, info2.y, info2.text)) {
+          // 如果与选中的行星重叠，隐藏当前标签
+          if (info2.isSelected) {
+            hasOverlap = true;
+            break;
+          }
+          // 如果两个都未选中，根据距离中心的距离决定隐藏哪个
+          const dist1 = Math.sqrt(Math.pow(info1.x - this.centerX, 2) + Math.pow(info1.y - this.centerY, 2));
+          const dist2 = Math.sqrt(Math.pow(info2.x - this.centerX, 2) + Math.pow(info2.y - this.centerY, 2));
+          // 距离中心更远的隐藏，如果距离相同，隐藏索引更大的（后绘制的）
+          if (dist1 > dist2 || (Math.abs(dist1 - dist2) < 1 && i > j)) {
+            hasOverlap = true;
+            break;
+          }
+        }
+      }
+      
+      this.labelStates.get(info1.body.name)!.targetOpacity = hasOverlap ? 0.0 : 1.0;
+    }
+
+    // 平滑过渡透明度（渐隐效果）
+    // 使用线性插值实现平滑渐隐，类似 NASA JPL Eyes
+    // 每帧都会更新，确保平滑过渡
+    const labelOpacities = new Map<string, number>();
+    this.labelStates.forEach((state, name) => {
+      const diff = state.targetOpacity - state.opacity;
+      // 使用更小的阈值，确保渐隐更平滑
+      if (Math.abs(diff) > 0.001) {
+        // 使用线性插值，确保平滑过渡
+        // fadeSpeed 越大，变化越快（每帧移动的距离）
+        state.opacity += diff * LABEL_CONFIG.fadeSpeed;
+        // 限制透明度范围
+        state.opacity = Math.max(0, Math.min(1, state.opacity));
+      } else {
+        // 接近目标值时，直接设置为目标值
+        state.opacity = state.targetOpacity;
+      }
+      labelOpacities.set(name, state.opacity);
+    });
+
+    // 绘制天体和标签
     sortedBodies.forEach((body) => {
       const isSelected = body.name === selectedPlanet;
-      this.drawBody(body, viewOffsetX, viewOffsetY, zoom, isSelected, lang);
+      this.drawBody(body, viewOffsetX, viewOffsetY, zoom, isSelected, lang, labelOpacities.get(body.name) ?? 1.0);
     });
 
     this.ctx.restore();
@@ -488,8 +670,9 @@ export default function SolarSystemCanvas() {
     };
   };
 
-  // 使用 useRef 存储绘制函数，确保引用稳定
+  // 使用 useRef 存储绘制函数和渲染器实例，确保引用稳定
   const drawRef = useRef<() => void>(() => {});
+  const rendererRef = useRef<SolarSystemRenderer | null>(null);
 
   // 初始化绘制函数
   useEffect(() => {
@@ -503,8 +686,20 @@ export default function SolarSystemCanvas() {
       const state = useSolarSystemStore.getState();
       const currentJulianDay = dateToJulianDay(state.currentTime);
       const currentZoom = smoothZoomRef.current;
-      const renderer = new SolarSystemRenderer(ctx, canvas.width, canvas.height);
-      renderer.render(
+      
+      // 使用显示尺寸（CSS 尺寸），因为 context 已经按 DPR 缩放
+      const displayWidth = canvas.clientWidth || canvas.width / (window.devicePixelRatio || 1);
+      const displayHeight = canvas.clientHeight || canvas.height / (window.devicePixelRatio || 1);
+      
+      // 重用渲染器实例，保持 labelStates 状态
+      if (!rendererRef.current) {
+        rendererRef.current = new SolarSystemRenderer(ctx, displayWidth, displayHeight);
+      } else if (rendererRef.current.width !== displayWidth || rendererRef.current.height !== displayHeight) {
+        // 尺寸改变时更新，但保持 labelStates
+        rendererRef.current.updateSize(displayWidth, displayHeight);
+      }
+      
+      rendererRef.current.render(
         state.celestialBodies,
         state.selectedPlanet,
         state.viewOffset.x,
@@ -554,16 +749,39 @@ export default function SolarSystemCanvas() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
     const resize = () => {
       // 使用容器的实际尺寸
       const container = canvas.parentElement;
+      let displayWidth: number;
+      let displayHeight: number;
+      
       if (container) {
-        canvas.width = container.clientWidth;
-        canvas.height = container.clientHeight;
+        displayWidth = container.clientWidth;
+        displayHeight = container.clientHeight;
       } else {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        displayWidth = window.innerWidth;
+        displayHeight = window.innerHeight;
       }
+      
+      // 获取设备像素比，处理高 DPR 设备（如 Retina 显示器）
+      const dpr = window.devicePixelRatio || 1;
+      
+      // 设置 canvas 的实际尺寸（考虑 DPR）
+      canvas.width = displayWidth * dpr;
+      canvas.height = displayHeight * dpr;
+      
+      // 设置 canvas 的 CSS 显示尺寸
+      canvas.style.width = `${displayWidth}px`;
+      canvas.style.height = `${displayHeight}px`;
+      
+      // 使用 setTransform 设置缩放，确保每次都是正确的缩放值（不累积）
+      // 注意：设置 canvas.width/height 会重置 context，所以这里需要重新设置 transform
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      
+      // 更新 renderer 的尺寸（使用显示尺寸，因为 context 已经缩放）
       drawRef.current();
     };
     resize();
@@ -620,8 +838,11 @@ export default function SolarSystemCanvas() {
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const clickX = e.clientX - rect.left - canvas.width / 2;
-    const clickY = e.clientY - rect.top - canvas.height / 2;
+    // 使用显示尺寸（CSS 尺寸）计算点击坐标，因为绘制也使用显示尺寸
+    const displayWidth = canvas.clientWidth;
+    const displayHeight = canvas.clientHeight;
+    const clickX = e.clientX - rect.left - displayWidth / 2;
+    const clickY = e.clientY - rect.top - displayHeight / 2;
 
     let clickedBody: string | null = null;
     let minDistance = Infinity;
@@ -652,7 +873,7 @@ export default function SolarSystemCanvas() {
     e.preventDefault();
     // 增加缩放灵敏度：根据滚轮滚动距离调整缩放因子
     // 使用更敏感的缩放因子，并考虑滚动速度
-    const baseFactor = 0.25; // 基础缩放因子（每次滚动5%）
+    const baseFactor = 0.5; // 基础缩放因子（每次滚动5%）
     const scrollSpeed = Math.min(Math.abs(e.deltaY) / 100, 3); // 限制最大滚动速度影响
     const zoomFactor = e.deltaY > 0 
       ? 1 - (baseFactor * scrollSpeed)  // 缩小：0.95, 0.90, 0.85...
@@ -713,9 +934,12 @@ export default function SolarSystemCanvas() {
         const canvas = canvasRef.current;
         if (canvas) {
           const rect = canvas.getBoundingClientRect();
+          // 使用显示尺寸计算坐标
+          const displayWidth = canvas.clientWidth;
+          const displayHeight = canvas.clientHeight;
           // 初始触摸中心相对于画布中心的位置（这是缩放中心）
-          const initialScreenX = pinchCenterRef.current.x - rect.left - canvas.width / 2;
-          const initialScreenY = pinchCenterRef.current.y - rect.top - canvas.height / 2;
+          const initialScreenX = pinchCenterRef.current.x - rect.left - displayWidth / 2;
+          const initialScreenY = pinchCenterRef.current.y - rect.top - displayHeight / 2;
 
           // 使用初始视图偏移计算初始缩放中心在世界坐标系中的位置
           const worldX = (initialScreenX / initialZoomRef.current) - initialViewOffsetRef.current.x;
