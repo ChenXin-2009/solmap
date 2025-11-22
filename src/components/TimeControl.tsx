@@ -5,20 +5,42 @@
 
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useSolarSystemStore } from '@/lib/state';
 
-export default function TimeControl() {
-  const { 
-    currentTime, 
-    setCurrentTime, 
-    lang,
-    isPlaying,
-    timeSpeed,
-    playDirection,
-    startPlaying,
-    togglePlayPause
-  } = useSolarSystemStore();
+// 使用节流来减少时间显示的更新频率
+function useThrottledTime(currentTime: Date, interval: number = 100) {
+  const [throttledTime, setThrottledTime] = useState(currentTime);
+  const lastUpdateRef = useRef<number>(0);
+
+  useEffect(() => {
+    const now = Date.now();
+    if (now - lastUpdateRef.current >= interval) {
+      setThrottledTime(currentTime);
+      lastUpdateRef.current = now;
+    } else {
+      const timeoutId = setTimeout(() => {
+        setThrottledTime(currentTime);
+        lastUpdateRef.current = Date.now();
+      }, interval - (now - lastUpdateRef.current));
+      return () => clearTimeout(timeoutId);
+    }
+  }, [currentTime, interval]);
+
+  return throttledTime;
+}
+
+// 使用 React.memo 和选择器优化性能
+const TimeControl = React.memo(() => {
+  // 只订阅需要的状态，避免频繁重渲染
+  const currentTime = useSolarSystemStore((state) => state.currentTime);
+  const setCurrentTime = useSolarSystemStore((state) => state.setCurrentTime);
+  const lang = useSolarSystemStore((state) => state.lang);
+  const isPlaying = useSolarSystemStore((state) => state.isPlaying);
+  const timeSpeed = useSolarSystemStore((state) => state.timeSpeed);
+  const playDirection = useSolarSystemStore((state) => state.playDirection);
+  const startPlaying = useSolarSystemStore((state) => state.startPlaying);
+  const togglePlayPause = useSolarSystemStore((state) => state.togglePlayPause);
   
   const calendarButtonRef = useRef<HTMLButtonElement>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -31,9 +53,12 @@ export default function TimeControl() {
     setRealTime(new Date());
   }, []);
   
-  // 计算与当前时间的差值（天）
+  // 使用节流的时间，减少重渲染频率（每100ms更新一次，而不是每帧）
+  const displayTime = useThrottledTime(currentTime, 100);
+  
+  // 计算与当前时间的差值（天）- 使用节流后的时间
   const timeDiff = realTime 
-    ? (currentTime.getTime() - realTime.getTime()) / (1000 * 60 * 60 * 24)
+    ? (displayTime.getTime() - realTime.getTime()) / (1000 * 60 * 60 * 24)
     : 0;
   const absTimeDiff = Math.abs(timeDiff);
   
@@ -131,7 +156,7 @@ export default function TimeControl() {
 
   return (
     <>
-      <div className="w-full bg-black/90 backdrop-blur-sm border-b border-white/10 relative z-10">
+      <div className="w-full bg-black/90 relative z-10" style={{ willChange: 'auto', transform: 'translateZ(0)' }}>
         <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-2.5">
           {/* 主控制行：速度按钮（左） | 时间显示 | 速度按钮（右） */}
           <div className="flex items-center justify-between gap-2 sm:gap-4">
@@ -209,7 +234,7 @@ export default function TimeControl() {
                 
                 {/* 时间显示 */}
                 <div className="text-white text-sm sm:text-lg font-mono font-semibold" suppressHydrationWarning>
-                  {formatDateTime(currentTime)}
+                  {formatDateTime(displayTime)}
                 </div>
                 
                 {/* 日历按钮 */}
@@ -306,12 +331,14 @@ export default function TimeControl() {
       <input
         ref={dateInputRef}
         type="date"
-        value={formatDate(currentTime)}
+        value={formatDate(displayTime)}
         onChange={handleDateChange}
         className="hidden"
         max={formatDate(new Date(2100, 11, 31))}
         min={formatDate(new Date(1900, 0, 1))}
       />
-    </>
+    </>  
   );
-}
+});
+
+export default TimeControl;

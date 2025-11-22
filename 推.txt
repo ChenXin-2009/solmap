@@ -1,0 +1,15 @@
+git status
+
+	如果显示 Changes not staged for commit 或 Untracked files：
+
+	git add .
+	git commit -m "保存本地修改，准备新版本"
+
+git checkout main
+git pull origin main
+
+git add .
+git commit -m "Release 1.1.0: 更新说明"
+git tag v1.1.0
+git push origin main
+git push origin v1.1.0
