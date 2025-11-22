@@ -29,7 +29,7 @@ const ORBIT_CONFIG = {
   colors: {
     mercury: '#c4cbcf',
     venus: '#fcc307',
-    earth: '#0aec2',
+    earth: '#22a2c3',
     mars: '#f5391c',
     jupiter: '#D8CA9D',
     saturn: '#FAD5A5',

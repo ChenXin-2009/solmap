@@ -41,8 +41,9 @@ export class SceneManager {
     this.scene.background = new THREE.Color(0x000000); // 黑色背景
 
     // 初始化相机（必须在 updateSize 之前）
+    // 使用更小的 near 值（0.01）和更大的 far 值（1e12）以适应太阳系的大尺度
     const aspect = container.clientWidth / container.clientHeight || 1;
-    this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 10000); // 增大 far 值
+    this.camera = new THREE.PerspectiveCamera(75, aspect, 0.01, 1e12);
     this.camera.position.set(0, 0, 10);
 
     // 设置渲染器尺寸（在相机初始化之后）
@@ -82,11 +83,16 @@ export class SceneManager {
 
   /**
    * 动态调整相机视距裁剪
+   * 根据当前观察对象自动调整 near 和 far，防止裁切问题
    */
   updateCameraClipping(currentObjectRadius: number, distanceToSun: number): void {
-    // near 和 far 根据当前观察对象自动调整
-    const near = Math.max(0.01, currentObjectRadius * 0.01);
-    const far = Math.max(100, Math.min(10000, distanceToSun)); // 确保 far 至少为 100
+    // near 值：确保足够小，避免近距离裁切
+    // 使用当前对象半径的 0.001 倍，但最小为 0.001（防止过小导致精度问题）
+    const near = Math.max(0.001, Math.min(0.01, currentObjectRadius * 0.001));
+    
+    // far 值：确保足够大，覆盖整个太阳系
+    // 使用距离太阳的距离的 10 倍，但最小为 100，最大为 1e12
+    const far = Math.max(100, Math.min(1e12, distanceToSun * 10));
     
     this.camera.near = near;
     this.camera.far = far;

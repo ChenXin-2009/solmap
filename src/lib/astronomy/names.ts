@@ -7,6 +7,7 @@
 
 export const planetNames: Record<string, Record<string, string>> = {
   en: {
+    Sun: 'Sun',
     Mercury: 'Mercury',
     Venus: 'Venus',
     Earth: 'Earth',
@@ -18,6 +19,7 @@ export const planetNames: Record<string, Record<string, string>> = {
     Moon: 'Moon',
   },
   zh: {
+    Sun: '太阳',
     Mercury: '水星',
     Venus: '金星',
     Earth: '地球',

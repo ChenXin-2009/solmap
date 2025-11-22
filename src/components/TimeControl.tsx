@@ -111,9 +111,9 @@ const TimeControl = React.memo(() => {
   // 速度预设值：每秒前进多少天
   // 1天 = 1天，1月 ≈ 30天，1年 = 365天
   const speedPresets = [
-    { value: 1, label: lang === 'zh' ? '天' : 'Day' },      // 每秒前进1天
-    { value: 30, label: lang === 'zh' ? '月' : 'Month' },   // 每秒前进30天（约1个月）
-    { value: 365, label: lang === 'zh' ? '年' : 'Year' },   // 每秒前进365天（1年）
+    { value: 1, label: lang === 'zh' ? '天' : 'Day', type: 'day' },      // 每秒前进1天
+    { value: 30, label: lang === 'zh' ? '月' : 'Month', type: 'month' },   // 每秒前进30天（约1个月）
+    { value: 365, label: lang === 'zh' ? '年' : 'Year', type: 'year' },   // 每秒前进365天（1年）
   ];
 
   // 处理日期选择
@@ -156,40 +156,43 @@ const TimeControl = React.memo(() => {
 
   return (
     <>
-      <div className="w-full bg-black/90 relative z-10" style={{ willChange: 'auto', transform: 'translateZ(0)' }}>
-        <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-2.5">
-          {/* 主控制行：速度按钮（左） | 时间显示 | 速度按钮（右） */}
-          <div className="flex items-center justify-between gap-2 sm:gap-4">
-            {/* 左侧速度按钮组 - 后退 */}
-            <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 flex-shrink-0">
-              <span className="text-white text-xs font-medium hidden sm:inline">
-                {lang === 'zh' ? '后退' : 'Back'}
-              </span>
-              <div className="flex flex-wrap items-center gap-1">
-                {/* 反转排序，与前进按钮相反 */}
-                {speedPresets.slice().reverse().map((preset) => {
-                  const isActive = isPlaying && timeSpeed === preset.value && playDirection === 'backward';
-                  return (
-                    <button
-                      key={`back-${preset.value}`}
-                      onClick={() => handleSpeedButtonClick(preset.value, 'backward')}
-                      className={`px-2 py-1 text-xs rounded transition-colors font-medium ${
-                        isActive
-                          ? 'bg-red-500 text-white'
-                          : 'bg-white/10 hover:bg-white/20 text-white'
-                      }`}
-                      title={`${lang === 'zh' ? '后退速度' : 'Backward speed'}: ${preset.value}x`}
-                    >
-                      {preset.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
+      {/* 主控制行：速度按钮（左） | 时间显示 | 速度按钮（右） */}
+      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-center gap-2 sm:gap-4 px-2 sm:px-4 py-2 sm:py-2.5" style={{ willChange: 'auto', transform: 'translateZ(0)', pointerEvents: 'auto' }}>
             {/* 中间时间显示区域 */}
-            <div className="flex flex-col items-center gap-1 flex-1 min-w-0 px-2 relative">
+            <div className="flex flex-col items-center gap-1 min-w-0 px-2 relative">
               <div className="flex items-center gap-2">
+                {/* 后退按钮组 - 年月天（箭头向左） */}
+                <div className="flex items-center gap-1">
+                  {speedPresets.slice().reverse().map((preset) => {
+                    const isActive = isPlaying && timeSpeed === preset.value && playDirection === 'backward';
+                    return (
+                      <button
+                        key={`back-${preset.value}`}
+                        onClick={() => handleSpeedButtonClick(preset.value, 'backward')}
+                        className={`p-1.5 rounded transition-colors ${
+                          isActive
+                            ? 'bg-red-500 text-white'
+                            : 'bg-white/10 hover:bg-white/20 text-white'
+                        }`}
+                        title={`${lang === 'zh' ? '后退速度' : 'Backward speed'}: ${preset.value}x (${preset.label})`}
+                      >
+                        <svg 
+                          xmlns="http://www.w3.org/2000/svg" 
+                          width="16" 
+                          height="16" 
+                          viewBox="0 0 24 24" 
+                          fill="none" 
+                          stroke="currentColor" 
+                          strokeWidth="2" 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round"
+                        >
+                          <polyline points="15 18 9 12 15 6"></polyline>
+                        </svg>
+                      </button>
+                    );
+                  })}
+                </div>
                 {/* 暂停/播放按钮 */}
                 <button
                   onClick={togglePlayPause}
@@ -262,6 +265,39 @@ const TimeControl = React.memo(() => {
                     <line x1="3" y1="10" x2="21" y2="10"></line>
                   </svg>
                 </button>
+                
+                {/* 前进按钮组 - 年月天（箭头向右） */}
+                <div className="flex items-center gap-1">
+                  {speedPresets.map((preset) => {
+                    const isActive = isPlaying && timeSpeed === preset.value && playDirection === 'forward';
+                    return (
+                      <button
+                        key={`forward-${preset.value}`}
+                        onClick={() => handleSpeedButtonClick(preset.value, 'forward')}
+                        className={`p-1.5 rounded transition-colors ${
+                          isActive
+                            ? 'bg-green-500 text-white'
+                            : 'bg-white/10 hover:bg-white/20 text-white'
+                        }`}
+                        title={`${lang === 'zh' ? '前进速度' : 'Forward speed'}: ${preset.value}x (${preset.label})`}
+                      >
+                        <svg 
+                          xmlns="http://www.w3.org/2000/svg" 
+                          width="16" 
+                          height="16" 
+                          viewBox="0 0 24 24" 
+                          fill="none" 
+                          stroke="currentColor" 
+                          strokeWidth="2" 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round"
+                        >
+                          <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* 时间差显示和"现在"按钮 */}
@@ -297,35 +333,7 @@ const TimeControl = React.memo(() => {
                 </div>
               )}
             </div>
-
-            {/* 右侧速度按钮组 - 前进 */}
-            <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 flex-shrink-0">
-              <div className="flex flex-wrap items-center gap-1">
-                {speedPresets.map((preset) => {
-                  const isActive = isPlaying && timeSpeed === preset.value && playDirection === 'forward';
-                  return (
-                    <button
-                      key={`forward-${preset.value}`}
-                      onClick={() => handleSpeedButtonClick(preset.value, 'forward')}
-                      className={`px-2 py-1 text-xs rounded transition-colors font-medium ${
-                        isActive
-                          ? 'bg-green-500 text-white'
-                          : 'bg-white/10 hover:bg-white/20 text-white'
-                      }`}
-                      title={`${lang === 'zh' ? '前进速度' : 'Forward speed'}: ${preset.value}x`}
-                    >
-                      {preset.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <span className="text-white text-xs font-medium hidden sm:inline">
-                {lang === 'zh' ? '前进' : 'Forward'}
-              </span>
-            </div>
           </div>
-        </div>
-      </div>
       
       {/* 隐藏的日期输入框，用于直接打开日历选择器 */}
       <input
