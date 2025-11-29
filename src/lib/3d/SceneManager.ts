@@ -1,11 +1,16 @@
 /**
  * SceneManager.ts - Three.js 场景管理器
  * 
- * 负责初始化：
- * - WebGL2Renderer（抗锯齿、色彩空间、高分屏支持）
- * - Scene（全局光、空间背景）
- * - Camera（PerspectiveCamera）
- * - Resize 处理
+ * 功能：
+ * - 初始化和管理 Three.js 场景、渲染器、相机
+ * - 处理窗口大小变化
+ * - 动态调整相机视距裁剪（防止近远平面裁切问题）
+ * - 管理场景背景（星空效果）
+ * 
+ * 使用：
+ * - 在组件中创建 SceneManager 实例
+ * - 通过 getScene()、getCamera()、getRenderer() 获取对象
+ * - 在动画循环中调用 render() 渲染场景
  */
 
 import * as THREE from 'three';
@@ -34,16 +39,25 @@ export class SceneManager {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 限制最大像素比
     this.renderer.setClearColor(0x000000, 1); // 明确设置清除颜色为黑色
     
+    // ⚠️ 修复：在 Canvas 元素上设置 touchAction，而不是在容器上
+    // 这样可以避免影响 fixed 定位的按钮（Firefox 特别敏感）
+    this.renderer.domElement.style.touchAction = 'none';
+    
     container.appendChild(this.renderer.domElement);
 
     // 初始化场景
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x000000); // 黑色背景
+    
+    // 添加星空背景
+    this.createStarfield();
 
     // 初始化相机（必须在 updateSize 之前）
     // 使用更小的 near 值（0.01）和更大的 far 值（1e12）以适应太阳系的大尺度
+    // FOV 从 CameraController 配置中读取（如果可用），否则使用默认值 75
     const aspect = container.clientWidth / container.clientHeight || 1;
-    this.camera = new THREE.PerspectiveCamera(75, aspect, 0.01, 1e12);
+    const fov = 75; // 默认 FOV，实际值由 CameraController 管理
+    this.camera = new THREE.PerspectiveCamera(fov, aspect, 0.01, 1e12);
     this.camera.position.set(0, 0, 10);
 
     // 设置渲染器尺寸（在相机初始化之后）
@@ -51,6 +65,53 @@ export class SceneManager {
 
     // 光照将在 SolarSystemCanvas3D 中添加，这里不添加
     // 注意：窗口大小变化监听器由 SolarSystemCanvas3D 统一管理，避免重复绑定
+  }
+
+  /**
+   * 创建星空背景（固定在相机空间，不随太阳系缩放）
+   */
+  private createStarfield(): void {
+    // 创建星空几何体（使用 Points 系统）
+    // 星星应该固定在相机空间，而不是世界空间
+    const starCount = 2000;
+    const stars = new Float32Array(starCount * 3);
+    const starSizes = new Float32Array(starCount);
+    
+    for (let i = 0; i < starCount; i++) {
+      // 在单位球面上随机分布星星（归一化方向向量）
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(Math.random() * 2 - 1);
+      
+      // 使用单位向量，星星位置相对于相机固定
+      stars[i * 3] = Math.sin(phi) * Math.cos(theta);
+      stars[i * 3 + 1] = Math.sin(phi) * Math.sin(theta);
+      stars[i * 3 + 2] = Math.cos(phi);
+      
+      // 随机星星大小（0.5-2像素）
+      starSizes[i] = Math.random() * 1.5 + 0.5;
+    }
+    
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(stars, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
+    
+    // 使用 PointsMaterial 渲染星星
+    const material = new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 1,
+      sizeAttenuation: false, // 星星大小不随距离变化
+      transparent: true,
+      opacity: 0.8,
+    });
+    
+    const starfield = new THREE.Points(geometry, material);
+    
+    // 将星空添加到场景，但使用特殊的渲染方式
+    // 在动画循环中，我们需要将星空位置更新为相机位置
+    starfield.userData.isStarfield = true; // 标记为星空
+    starfield.userData.fixedToCamera = true; // 固定在相机空间
+    
+    this.scene.add(starfield);
   }
 
   updateSize(): void {
@@ -63,6 +124,16 @@ export class SceneManager {
     }
 
     this.renderer.setSize(width, height);
+  }
+  
+  /**
+   * 更新相机 FOV（视野角度）
+   */
+  updateFOV(fov: number): void {
+    if (this.camera) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   getRenderer(): THREE.WebGLRenderer {

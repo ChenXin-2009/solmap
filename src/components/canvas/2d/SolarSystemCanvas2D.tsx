@@ -49,13 +49,14 @@ const ORBIT_CONFIG = {
 };
 
 /**
- * 文字标签配置
+ * 文字标签配置（2D 画布）
+ * 字体统一使用 SourceHanSerifCN，字重默认 700，可在运行时从 CSS 变量覆盖
  */
 const LABEL_CONFIG = {
   // 字体设置
   fontSize: 16,        // 字体大小（像素）
-  fontFamily: '"SmileySans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  fontWeight: 'bold',  // 字体粗细
+  fontFamily: '"SourceHanSerifCN", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  fontWeight: 700,     // 默认标签字重（数值），会在构造函数中尝试从 --font-weight-label 覆盖
   
   // 文字位置
   offsetY: 8,          // 文字距离行星的垂直偏移（像素）
@@ -84,6 +85,8 @@ class SolarSystemRenderer {
   private centerY: number;
   // 存储标签透明度状态，用于平滑渐隐
   private labelStates: Map<string, { opacity: number; targetOpacity: number }> = new Map();
+  // 从 CSS 变量解析出的实际标签字重（用于 Canvas 文本绘制）
+  private labelFontWeight: string;
 
   constructor(ctx: CanvasRenderingContext2D, width: number, height: number) {
     this.ctx = ctx;
@@ -91,6 +94,15 @@ class SolarSystemRenderer {
     this.height = height;
     this.centerX = width / 2;
     this.centerY = height / 2;
+
+    // 从全局 CSS 变量中读取标签字重，如果不可用则使用 LABEL_CONFIG 中的默认值
+    if (typeof window !== 'undefined') {
+      const rootStyles = getComputedStyle(document.documentElement);
+      const weightVar = rootStyles.getPropertyValue('--font-weight-label').trim();
+      this.labelFontWeight = weightVar || String(LABEL_CONFIG.fontWeight);
+    } else {
+      this.labelFontWeight = String(LABEL_CONFIG.fontWeight);
+    }
   }
   
   // 更新尺寸（当窗口大小改变时）
@@ -414,8 +426,8 @@ class SolarSystemRenderer {
       this.ctx.imageSmoothingEnabled = true;
       this.ctx.imageSmoothingQuality = 'high';
       this.ctx.fillStyle = `rgba(255, 255, 255, ${labelOpacity})`;
-      // 使用配置的字体设置
-      this.ctx.font = `${LABEL_CONFIG.fontWeight} ${LABEL_CONFIG.fontSize}px ${LABEL_CONFIG.fontFamily}`;
+      // 使用配置的字体设置（字重从 CSS 变量解析，确保 Canvas 能正确识别数值）
+      this.ctx.font = `${this.labelFontWeight} ${LABEL_CONFIG.fontSize}px ${LABEL_CONFIG.fontFamily}`;
       this.ctx.textAlign = 'center';
       this.ctx.textBaseline = 'top';
       // 使用更清晰的文字阴影

@@ -27,9 +27,18 @@ interface ScaleRulerProps {
 export default function ScaleRuler({ camera, container, controlsTarget }: ScaleRulerProps) {
   const rulerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState<string>('');
+  const [isVisible, setIsVisible] = useState<boolean>(false);
 
   useEffect(() => {
-    if (!camera || !container || !rulerRef.current) return;
+    // 如果 camera 或 container 还没有初始化，等待它们初始化
+    if (!camera || !container) {
+      setScale(''); // 清空标尺显示
+      setIsVisible(false);
+      return;
+    }
+    
+    // 标记为可见
+    setIsVisible(true);
 
     const updateScale = () => {
       if (!camera || !container || !rulerRef.current) return;
@@ -115,7 +124,8 @@ export default function ScaleRuler({ camera, container, controlsTarget }: ScaleR
     return () => clearInterval(interval);
   }, [camera, container, controlsTarget]);
 
-  if (!camera || !container) return null;
+  // 如果不可见或没有 scale 值，不显示标尺
+  if (!isVisible || !scale) return null;
 
   return (
     <div
@@ -123,7 +133,8 @@ export default function ScaleRuler({ camera, container, controlsTarget }: ScaleR
       className="absolute top-4 right-4 z-20 pointer-events-none"
       style={{
         color: '#ffffff',
-        fontFamily: '"SmileySans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        // 与全局保持一致，使用思源宋体 CN，可变字重用 body 字重
+        fontFamily: '"SourceHanSerifCN", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
         fontSize: '14px',
         textShadow: '0 0 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)',
         backgroundColor: 'rgba(0, 0, 0, 0.5)',

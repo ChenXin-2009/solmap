@@ -49,13 +49,14 @@ const ORBIT_CONFIG = {
 };
 
 /**
- * 文字标签配置
+ * 文字标签配置（旧 2D Canvas 版本）
+ * 为保持风格统一，同样使用 SourceHanSerifCN，可根据需要继续使用这个组件时生效
  */
 const LABEL_CONFIG = {
   // 字体设置
   fontSize: 16,        // 字体大小（像素）
-  fontFamily: '"SmileySans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  fontWeight: 'bold',  // 字体粗细
+  fontFamily: '"SourceHanSerifCN", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  fontWeight: 700,     // 标签字重
   
   // 文字位置
   offsetY: 8,          // 文字距离行星的垂直偏移（像素）

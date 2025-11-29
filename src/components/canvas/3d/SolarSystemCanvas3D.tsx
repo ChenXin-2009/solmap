@@ -1,18 +1,24 @@
 /**
  * SolarSystemCanvas3D.tsx - 太阳系 3D Three.js 渲染组件
  * 
- * MVP 阶段：基础 3D 渲染
- * - SceneManager 核心渲染器
- * - CameraController 自由观察模式
- * - Planet.ts 基础行星
- * - OrbitCurve.ts 轨道线
- * - 视距裁剪
- * - 简化版对数缩放
+ * 功能：
+ * - 使用 Three.js 渲染 3D 太阳系场景
+ * - 管理行星、轨道、标签的创建和更新
+ * - 实现点击聚焦、跟踪、缩放等交互功能
+ * - 处理重叠检测和标签显示逻辑
+ * - 集成星空背景、轨道渐变、太阳光晕等视觉效果
+ * 
+ * 主要组件：
+ * - SceneManager: 场景、渲染器、相机管理
+ * - CameraController: 相机控制和交互
+ * - Planet: 行星网格和标记圈
+ * - OrbitCurve: 3D 轨道曲线
+ * - CSS2DRenderer: 2D 标签渲染
  */
 
 'use client';
 
-import React, { useRef, useEffect, useLayoutEffect } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState } from 'react';
 import { useSolarSystemStore } from '@/lib/state';
 import { SceneManager } from '@/lib/3d/SceneManager';
 import { CameraController } from '@/lib/3d/CameraController';
@@ -25,8 +31,10 @@ import * as THREE from 'three';
 import { Raycaster } from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import ScaleRuler from './ScaleRuler';
+import SettingsMenu from '@/components/SettingsMenu';
 
 // ==================== 可调参数配置 ====================
+// ⚙️ 以下参数可在文件顶部调整，影响 3D 场景显示效果
 
 // 轨道颜色配置（与2D版本一致）
 const ORBIT_COLORS: Record<string, string> = {
@@ -53,21 +61,40 @@ const ROTATION_SPEEDS: Record<string, number> = {
   sun: 0.000000725,     // 约 27 天/转
 };
 
-// 标签配置
+// 标签配置（字体粗细通过 CSS 变量可调）
 const LABEL_CONFIG = {
-  offsetX: 25, // 标签相对于标记圈中心的X轴偏移（像素，右侧）
-  offsetY: -8, // 标签相对于标记圈中心的Y轴偏移（像素，上方）
-  sunOffsetY: 30, // 太阳标签的Y轴偏移（像素，太阳标签在太阳上方，值越大离太阳越远）
+  // 🔧 行星标签相对于标记圈中心的X轴偏移（像素，右侧）
+  offsetX: 25,
+  
+  // 🔧 行星标签相对于标记圈中心的Y轴偏移（像素，上方）
+  offsetY: -8,
+  
+  // 🔧 太阳标签在太阳上方的像素偏移（CSS 像素，而不是 3D 空间单位）
+  sunOffsetY: -20,
+  
+  // 🔧 字体大小
   fontSize: '16px',
-  fontFamily: '"SmileySans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  fadeSpeed: 0.2, // 渐隐速度（0-1，值越大变化越快）
-  minZoomToShow: 10, // 最小缩放级别（低于此值不显示任何标签，除了选中的）
+  
+  // 🔧 字体族（全站统一使用思源宋体 CN 可变字体）
+  fontFamily: '"SourceHanSerifCN", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  
+  // 🔧 字体粗细（行星/太阳标签字重，可在 globals.css 中调整）
+  fontWeight: 'var(--font-weight-label)',
+  
+  // 🔧 渐隐速度（0-1，值越大变化越快）
+  fadeSpeed: 0.2,
+  
+  // 🔧 最小缩放级别（低于此值不显示任何标签，除了选中的）
+  minZoomToShow: 10,
 };
 
 // 聚焦配置
 const FOCUS_CONFIG = {
-  distanceMultiplier: 20, // 聚焦距离倍数（相对于行星半径，值越大相机离行星越远）
-  minDistance: 0.01, // 最小聚焦距离（AU，确保相机不会太近）
+  // 🔧 聚焦距离倍数（相对于行星半径，值越大相机离行星越远）
+  distanceMultiplier: 20,
+  
+  // 🔧 最小聚焦距离（AU，确保相机不会太近）
+  minDistance: 0.01,
 };
 
 // 初始相机位置
@@ -77,7 +104,31 @@ const INITIAL_CAMERA_POSITION = {
   z: 30,
 };
 
-// 轨道曲线点数
+// 🔧 相机初始角度配置（度）
+// 注意：
+// - 上下角度（polarAngle）：0度 = 俯视（垂直于轨道平面），90度 = 水平视角，180度 = 仰视
+// - 左右角度（azimuthalAngle）：0度 = 正前方，90度 = 右侧，-90度 = 左侧，180度/-180度 = 正后方
+const CAMERA_ANGLE_CONFIG = {
+  // 🔧 初始上下角度（度）：页面加载时的相机上下角度，0度 = 俯视
+  initialPolarAngle: 90,
+  
+  // 🔧 初始左右角度（度）：页面加载时的相机左右角度，0度 = 正前方
+  initialAzimuthalAngle: 90,
+  
+  // 🔧 过渡目标上下角度（度）：从初始角度平滑过渡到的上下角度，45度 = 从俯视倾斜45度
+  targetPolarAngle: 160,
+  
+  // 🔧 过渡目标左右角度（度）：从初始角度平滑过渡到的左右角度，0度 = 保持正前方
+  targetAzimuthalAngle: 0,
+  
+  // 🔧 过渡延迟时间（毫秒）：页面加载后多久开始角度过渡
+  transitionDelay: 500,
+  
+  // 🔧 是否启用平滑过渡（true = 平滑过渡，false = 立即切换）
+  smoothTransition: true,
+};
+
+// 🔧 轨道曲线点数（值越大轨道越平滑，但性能开销越大）
 const ORBIT_CURVE_POINTS = 300;
 
 export default function SolarSystemCanvas3D() {
@@ -93,6 +144,11 @@ export default function SolarSystemCanvas3D() {
   const raycasterRef = useRef<Raycaster | null>(null);
   const mouseRef = useRef<THREE.Vector2>(new THREE.Vector2());
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  
+  // 用于触发设置菜单的重新渲染
+  const [isCameraControllerReady, setIsCameraControllerReady] = useState(false);
+  // 用于控制渐显效果
+  const [opacity, setOpacity] = useState(0);
 
   // 使用选择器避免不必要的重渲染
   // 3D组件不需要订阅这些状态，因为我们在动画循环中直接使用 getState()
@@ -140,23 +196,54 @@ export default function SolarSystemCanvas3D() {
         labelRendererRef.current = labelRenderer;
       }
 
-      // 设置初始相机位置（更远的距离以便看到整个太阳系）
-      camera.position.set(0, 10, 30);
-      camera.lookAt(0, 0, 0);
-      camera.updateProjectionMatrix();
-      
-      // 创建相机控制器（必须在设置相机位置之后）
+      // 创建相机控制器（不要手动设置 camera.position，让 OrbitControls 控制）
       const cameraController = new CameraController(camera, renderer.domElement);
       cameraControllerRef.current = cameraController;
       
-      // 设置相机控制器的目标点
+      // 设置相机控制器的目标点（使用 controls API，不要直接设置 camera.position）
       const controls = cameraController.getControls();
       controls.target.set(0, 0, 0);
+      
+      // 设置初始相机位置（通过 OrbitControls 控制）
+      // 先设置一个合理的距离，让 OrbitControls 自动计算位置
+      const initialDistance = 30;
+      camera.position.set(0, initialDistance, 0);
       controls.update();
+
+      
+      
+      // 设置初始相机角度（使用配置中的角度）
+      cameraController.setPolarAngle(CAMERA_ANGLE_CONFIG.initialPolarAngle, false);
+      cameraController.setAzimuthalAngle(CAMERA_ANGLE_CONFIG.initialAzimuthalAngle, false);
+      /*
+      // 延迟后平滑过渡到目标角度
+      setTimeout(() => {
+        if (cameraControllerRef.current) {
+          cameraControllerRef.current.setPolarAngle(
+            CAMERA_ANGLE_CONFIG.targetPolarAngle,
+            CAMERA_ANGLE_CONFIG.smoothTransition
+          );
+          cameraControllerRef.current.setAzimuthalAngle(
+            CAMERA_ANGLE_CONFIG.targetAzimuthalAngle,
+            CAMERA_ANGLE_CONFIG.smoothTransition
+          );
+        }
+      }, CAMERA_ANGLE_CONFIG.transitionDelay);
+      */
+
+
+      // 触发设置菜单的重新渲染
+      setIsCameraControllerReady(true);
+      
+      // 渐显效果
+      setTimeout(() => {
+        setOpacity(1);
+      }, 100);
+      
       controls.enabled = true;
 
-      // 添加点光源（太阳光）
-      const sunLight = new THREE.PointLight(0xffffff, 3, 200);
+      // 添加点光源（太阳光）- 增强太阳的发光效果
+      const sunLight = new THREE.PointLight(0xffffaa, 5, 200); // 增加强度和范围
       sunLight.position.set(0, 0, 0);
       scene.add(sunLight);
       
@@ -183,14 +270,14 @@ export default function SolarSystemCanvas3D() {
         scene.add(sunMesh);
         planetsRef.current.set('sun', sunPlanet);
         
-        // 为太阳创建标签
+        // 为太阳创建标签（使用 CSS2D + 像素偏移，避免用 3D 空间单位把文字推到行星轨道附近）
         if (!labelsRef.current.has('sun')) {
           const labelDiv = document.createElement('div');
           labelDiv.className = 'planet-label';
           labelDiv.textContent = planetNames[lang][sunBody.name] || sunBody.name;
           labelDiv.style.color = '#ffffff';
           labelDiv.style.fontSize = LABEL_CONFIG.fontSize;
-          labelDiv.style.fontWeight = 'bold';
+          labelDiv.style.fontWeight = LABEL_CONFIG.fontWeight;
           labelDiv.style.fontFamily = LABEL_CONFIG.fontFamily;
           labelDiv.style.pointerEvents = 'auto'; // 允许点击标签
           labelDiv.style.cursor = 'pointer'; // 鼠标悬停时显示手型光标
@@ -202,7 +289,13 @@ export default function SolarSystemCanvas3D() {
           labelDiv.style.display = 'block';
           
           const label = new CSS2DObject(labelDiv);
-          label.position.set(0, LABEL_CONFIG.sunOffsetY, 0); // 太阳标签在太阳上方
+          // 太阳标签锚点放在太阳中心，通过 CSS 像素偏移控制具体显示位置
+          label.position.set(0, 0, 0);
+          labelDiv.style.position = 'absolute';
+          labelDiv.style.left = `${LABEL_CONFIG.offsetX}px`;
+          labelDiv.style.top = `${LABEL_CONFIG.sunOffsetY}px`;
+          // 覆盖 CSS2DObject 默认 transform，避免重复偏移
+          labelDiv.style.transform = 'translate(0, 0)';
           sunMesh.add(label);
           labelsRef.current.set('sun', label);
         }
@@ -228,9 +321,10 @@ export default function SolarSystemCanvas3D() {
         // 创建标记圈（2D）
         planet.createMarkerCircle(CSS2DObject);
 
-        // 创建轨道
+        // 创建轨道（传入行星当前位置用于渐变计算）
         const orbitColor = ORBIT_COLORS[body.name.toLowerCase()] || body.color;
-        const orbit = new OrbitCurve(elements, orbitColor, ORBIT_CURVE_POINTS, julianDay);
+        const planetPosition = new THREE.Vector3(body.x, body.y, body.z);
+        const orbit = new OrbitCurve(elements, orbitColor, ORBIT_CURVE_POINTS, julianDay, planetPosition);
         scene.add(orbit.getLine());
         orbitsRef.current.set(body.name.toLowerCase(), orbit);
         
@@ -242,7 +336,7 @@ export default function SolarSystemCanvas3D() {
           labelDiv.textContent = planetNames[lang][body.name] || body.name;
           labelDiv.style.color = '#ffffff';
           labelDiv.style.fontSize = LABEL_CONFIG.fontSize;
-          labelDiv.style.fontWeight = 'bold';
+          labelDiv.style.fontWeight = LABEL_CONFIG.fontWeight;
           labelDiv.style.fontFamily = LABEL_CONFIG.fontFamily;
           labelDiv.style.pointerEvents = 'auto'; // 允许点击标签
           labelDiv.style.cursor = 'pointer'; // 鼠标悬停时显示手型光标
@@ -290,6 +384,13 @@ export default function SolarSystemCanvas3D() {
           if (planet) {
             planet.updatePosition(body.x, body.y, body.z);
             planet.updateRotation(deltaTime);
+            
+            // 更新轨道渐变（如果轨道存在）
+            const orbit = orbitsRef.current.get(key);
+            if (orbit) {
+              const planetPosition = new THREE.Vector3(body.x, body.y, body.z);
+              orbit.updatePlanetPosition(planetPosition);
+            }
           }
         });
         
@@ -307,6 +408,18 @@ export default function SolarSystemCanvas3D() {
           }
         }
 
+        // 更新星空位置（固定在相机空间）
+        scene.traverse((object) => {
+          if (object.userData.isStarfield && object.userData.fixedToCamera) {
+            // 将星空位置设置为相机位置，但保持方向不变
+            // 这样星星会始终在视野中，不会随太阳系缩放
+            object.position.copy(camera.position);
+            // 使用一个很大的缩放因子，确保星星始终在视野内
+            const scale = Math.max(100, camera.position.length() * 10);
+            object.scale.set(scale, scale, scale);
+          }
+        });
+        
         // 更新相机控制器（必须在渲染前调用，以应用阻尼效果）
         if (cameraControllerRef.current) {
           cameraControllerRef.current.update(deltaTime);
@@ -477,9 +590,10 @@ export default function SolarSystemCanvas3D() {
 
         // 渲染顺序：先更新 controls，再渲染场景
         // 确保 OrbitControls 的 update() 在 render() 之前调用
+        // 主渲染器和标签渲染器必须在同一帧同步执行，避免闪烁
         sceneManager.render();
         
-        // 渲染标签
+        // 立即在同一帧渲染标签（确保与主渲染器同步）
         if (labelRendererRef.current) {
           labelRendererRef.current.render(scene, camera);
         }
@@ -713,15 +827,18 @@ export default function SolarSystemCanvas3D() {
       ref={containerRef} 
       className="w-full h-full relative"
       style={{ 
-        touchAction: 'none',
+        // ⚠️ 修复：移除 touchAction: 'none'（已在 Canvas 元素上设置）
+        // ⚠️ 修复：移除 transform: 'translateZ(0)'（会创建新的 stacking context，导致 fixed 定位失效）
+        // ⚠️ 修复：移除 isolation: 'isolate'（会创建新的 stacking context，导致 fixed 定位的 z-index 失效，Firefox 平板特别敏感）
         // 防止移动端默认手势干扰
         WebkitTouchCallout: 'none',
         WebkitUserSelect: 'none',
         userSelect: 'none',
-        // 性能优化：使用GPU加速
-        willChange: 'transform',
-        transform: 'translateZ(0)',
-        isolation: 'isolate',
+        // 性能优化：使用GPU加速（但不用 transform，避免破坏 fixed 定位）
+        willChange: 'opacity',
+        // 渐显效果
+        opacity: opacity,
+        transition: 'opacity 1s ease-in-out',
       } as React.CSSProperties}
       onTouchStart={(e) => {
         // 防止移动端缩放时页面滚动
@@ -741,6 +858,10 @@ export default function SolarSystemCanvas3D() {
         container={containerRef.current}
         controlsTarget={cameraControllerRef.current?.getControls()?.target || null}
       />
+      {/* 设置菜单（仅在 3D 模式下显示） */}
+      {isCameraControllerReady && cameraControllerRef.current && (
+        <SettingsMenu cameraController={cameraControllerRef.current} />
+      )}
     </div>
   );
 }

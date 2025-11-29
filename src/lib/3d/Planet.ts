@@ -1,20 +1,55 @@
 /**
  * Planet.ts - 3D 行星类
- * 创建和管理 3D 行星网格
+ * 
+ * 功能：
+ * - 创建和管理 3D 行星网格（SphereGeometry + MeshStandardMaterial）
+ * - 管理行星自转动画
+ * - 创建标记圈（CSS2D，用于小行星的可视化）
+ * - 为太阳添加光晕效果
+ * 
+ * 使用：
+ * - 通过 PlanetConfig 创建行星实例
+ * - 在动画循环中调用 updatePosition() 和 updateRotation()
+ * - 通过 getMesh() 获取 Three.js Mesh 对象添加到场景
  */
 
 import * as THREE from 'three';
 import type { CelestialBody } from '@/lib/astronomy/orbit';
 
 // ==================== 可调参数配置 ====================
+// ⚙️ 以下参数可在文件顶部调整，影响行星显示效果
 
 // 标记圈配置
 const MARKER_CONFIG = {
-  size: 20, // 标记圈大小（像素，固定大小）- 增大以便更容易看到
-  strokeWidth: 2, // 标记圈线条宽度（像素）
-  baseOpacity: 1.0, // 标记圈基础透明度（完全不透明）
-  fadeSpeed: 0.2, // 渐隐速度（0-1，值越大变化越快）
-  minOpacity: 0.1, // 最小透明度（低于此值不显示）- 提高以便更容易看到
+  // 🔧 标记圈大小（像素，固定大小）
+  size: 20,
+  
+  // 🔧 标记圈线条宽度（像素）
+  strokeWidth: 2,
+  
+  // 🔧 标记圈基础透明度（完全不透明）
+  baseOpacity: 1.0,
+  
+  // 🔧 渐隐速度（0-1，值越大变化越快）
+  fadeSpeed: 0.2,
+  
+  // 🔧 最小透明度（低于此值不显示）
+  minOpacity: 0.1,
+};
+
+// 太阳光晕配置
+const SUN_GLOW_CONFIG = {
+  // 🔧 是否启用太阳光晕
+  enabled: true,
+  
+  // 🔧 光晕半径倍数（相对于太阳半径）
+  radiusMultiplier: 1.5,
+  
+  // 🔧 光晕颜色（十六进制）
+  color: 0xffffaa,
+  
+  // 🔧 光晕透明度（0-1）
+  opacity: 0.6,
 };
 
 // 真实行星半径（AU单位）
@@ -49,9 +84,12 @@ export class Planet {
   private markerObject: any = null; // CSS2DObject（当行星很小时显示）
   private currentOpacity: number = 0; // 当前透明度（用于渐隐）
   private targetOpacity: number = 0; // 目标透明度
+  private glowMesh: THREE.Mesh | null = null; // 太阳光晕网格
+  private isSun: boolean = false; // 是否为太阳
 
   constructor(config: PlanetConfig) {
     this.rotationSpeed = config.rotationSpeed;
+    this.isSun = config.body.isSun || false;
     
     // 使用真实行星半径（AU单位）
     const planetName = config.body.name.toLowerCase();
@@ -67,13 +105,60 @@ export class Planet {
     // 创建材质
     this.material = new THREE.MeshStandardMaterial({
       color: config.body.color || 0xffffff,
-      emissive: config.body.isSun ? config.body.color || 0xffff00 : 0x000000,
-      emissiveIntensity: config.body.isSun ? 0.5 : 0,
+      emissive: config.body.isSun ? 0xffffaa : 0x000000, // 太阳使用更亮的黄色发光
+      emissiveIntensity: config.body.isSun ? 2.0 : 0, // 增加太阳的发光强度
     });
 
     // 创建网格
     this.mesh = new THREE.Mesh(this.geometry, this.material);
+    
+    // 如果是太阳，创建光晕效果
+    if (this.isSun && SUN_GLOW_CONFIG.enabled) {
+      this.createSunGlow();
+    }
+    
     // 注意：标记圈在外部通过 createMarkerCircle() 方法创建
+  }
+  
+  /**
+   * 创建太阳光晕效果（多层光晕，模拟发光）
+   */
+  private createSunGlow(): void {
+    // 创建多层光晕，从内到外逐渐变透明
+    const glowLayers = [
+      { radius: 1.2, opacity: 0.8, color: 0xffffaa },
+      { radius: 1.5, opacity: 0.5, color: 0xffff88 },
+      { radius: 2.0, opacity: 0.3, color: 0xffff66 },
+    ];
+    
+    glowLayers.forEach((layer) => {
+      const glowRadius = this.realRadius * layer.radius;
+      const glowGeometry = new THREE.SphereGeometry(glowRadius, 32, 32);
+      
+      const glowMaterial = new THREE.MeshBasicMaterial({
+        color: layer.color,
+        transparent: true,
+        opacity: layer.opacity,
+        side: THREE.BackSide, // 只渲染背面，形成光晕效果
+        depthWrite: false, // 不写入深度缓冲，避免遮挡
+      });
+      
+      const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
+      this.mesh.add(glowMesh);
+    });
+    
+    // 保存最外层光晕的引用（用于后续更新）
+    const outerGlowRadius = this.realRadius * SUN_GLOW_CONFIG.radiusMultiplier;
+    const outerGlowGeometry = new THREE.SphereGeometry(outerGlowRadius, 32, 32);
+    const outerGlowMaterial = new THREE.MeshBasicMaterial({
+      color: SUN_GLOW_CONFIG.color,
+      transparent: true,
+      opacity: SUN_GLOW_CONFIG.opacity,
+      side: THREE.BackSide,
+      depthWrite: false,
+    });
+    this.glowMesh = new THREE.Mesh(outerGlowGeometry, outerGlowMaterial);
+    this.mesh.add(this.glowMesh);
   }
 
   /**
@@ -118,7 +203,7 @@ export class Planet {
   getMarkerObject(): any {
     return this.markerObject;
   }
-  
+
   /**
    * 更新标记圈的透明度（根据重叠情况，类似2D版本）
    * targetOpacity 由外部根据重叠检测结果设置
@@ -159,7 +244,7 @@ export class Planet {
    */
   getMarkerOpacity(): number {
     return this.currentOpacity;
-  }
+      }
 
   /**
    * 更新位置

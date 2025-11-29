@@ -3,6 +3,12 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* ===== 全局可调字体粗细参数（你可以在这里调试不同位置的字重） ===== */
+  --font-weight-body: 400;      /* 页面正文、普通文本 */
+  --font-weight-title: 600;     /* 标题/重要文本 */
+  --font-weight-label: 700;     /* 行星/太阳标签 */
+  --font-weight-mono: 500;      /* 等宽数字（时间显示等） */
 }
 
 @theme inline {
@@ -19,10 +25,18 @@
   }
 }
 
+/* 覆盖 Tailwind 的等宽字体类，让顶栏时间等使用思源宋体 CN + 等宽权重 */
+.font-mono {
+  font-family: 'SourceHanSerifCN', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: var(--font-weight-mono);
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* 全站默认使用思源宋体可变字体 */
+  font-family: 'SourceHanSerifCN', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: var(--font-weight-body);
   /* 防止页面缩放 */
   touch-action: none;
   -ms-touch-action: none;
@@ -55,11 +69,23 @@ input[type="date"].date-input-white::-webkit-clear-button {
   filter: invert(1);
 }
 
-/* 自定义字体 */
+/* 思源宋体 CN 可变字体（支持粗细调节） */
 @font-face {
-  font-family: 'SmileySans';
-  src: url('/fonts/SmileySans-Oblique.otf.woff2') format('woff2');
-  font-weight: normal;
+  font-family: 'SourceHanSerifCN';
+  src: url('/fonts/SourceHanSerifCN-VF.otf.woff2') format('woff2-variations');
+  font-weight: 100 900;
   font-style: normal;
   font-display: swap;
+}
+
+/* 淡入动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

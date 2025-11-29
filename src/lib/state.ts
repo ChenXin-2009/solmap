@@ -83,7 +83,7 @@ export const useSolarSystemStore = create<SolarSystemState>((set, get) => {
     selectedPlanet: null,
     viewOffset: { x: 0, y: 0 },
     zoom: DEFAULT_ZOOM,
-    viewMode: '2d', // 默认2D模式
+    viewMode: '3d', // 默认3D模式
     
     // ========== 语言 ==========
     lang: 'zh', // 默认中文

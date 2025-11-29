@@ -66,7 +66,7 @@ const TimeControl = React.memo(() => {
   const PRECISION_THRESHOLD_DAYS = 36525; // 100年
   const showPrecisionWarning = absTimeDiff > PRECISION_THRESHOLD_DAYS;
 
-  // 格式化日期时间
+  // 格式化日期时间（已废弃，改用 formatDate 和 formatTime）
   const formatDateTime = (date: Date): string => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -75,6 +75,14 @@ const TimeControl = React.memo(() => {
     const minutes = String(date.getMinutes()).padStart(2, '0');
     const seconds = String(date.getSeconds()).padStart(2, '0');
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  };
+  
+  // 格式化时间（时分秒）
+  const formatTime = (date: Date): string => {
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${hours}:${minutes}:${seconds}`;
   };
 
   // 格式化日期（用于日期选择器）
@@ -166,7 +174,7 @@ const TimeControl = React.memo(() => {
                   {speedPresets.slice().reverse().map((preset) => {
                     const isActive = isPlaying && timeSpeed === preset.value && playDirection === 'backward';
                     return (
-                      <button
+          <button
                         key={`back-${preset.value}`}
                         onClick={() => handleSpeedButtonClick(preset.value, 'backward')}
                         className={`p-1.5 rounded transition-colors ${
@@ -175,7 +183,7 @@ const TimeControl = React.memo(() => {
                             : 'bg-white/10 hover:bg-white/20 text-white'
                         }`}
                         title={`${lang === 'zh' ? '后退速度' : 'Backward speed'}: ${preset.value}x (${preset.label})`}
-                      >
+          >
                         <svg 
                           xmlns="http://www.w3.org/2000/svg" 
                           width="16" 
@@ -189,12 +197,12 @@ const TimeControl = React.memo(() => {
                         >
                           <polyline points="15 18 9 12 15 6"></polyline>
                         </svg>
-                      </button>
+          </button>
                     );
                   })}
                 </div>
                 {/* 暂停/播放按钮 */}
-                <button
+          <button
                   onClick={togglePlayPause}
                   className={`p-1.5 rounded transition-colors ${
                     isPlaying
@@ -233,15 +241,22 @@ const TimeControl = React.memo(() => {
                       <polygon points="5 3 19 12 5 21 5 3"></polygon>
                     </svg>
                   )}
-                </button>
+          </button>
                 
-                {/* 时间显示 */}
-                <div className="text-white text-sm sm:text-lg font-mono font-semibold" suppressHydrationWarning>
-                  {formatDateTime(displayTime)}
+                {/* 时间显示 - 年月日在上，时分秒在下 */}
+                <div className="flex flex-col items-center gap-0.5">
+                  {/* 年月日 */}
+                  <div className="text-white text-sm sm:text-base font-mono font-semibold" suppressHydrationWarning>
+                    {formatDate(displayTime)}
+                  </div>
+                  {/* 时分秒 - 字体更大 */}
+                  <div className="text-white text-base sm:text-xl font-mono font-semibold" suppressHydrationWarning>
+                    {formatTime(displayTime)}
+                  </div>
                 </div>
                 
                 {/* 日历按钮 */}
-                <button
+          <button
                   ref={calendarButtonRef}
                   onClick={handleCalendarClick}
                   className="text-white hover:text-blue-400 transition-colors cursor-pointer p-1"
@@ -264,14 +279,14 @@ const TimeControl = React.memo(() => {
                     <line x1="8" y1="2" x2="8" y2="6"></line>
                     <line x1="3" y1="10" x2="21" y2="10"></line>
                   </svg>
-                </button>
+          </button>
                 
                 {/* 前进按钮组 - 年月天（箭头向右） */}
                 <div className="flex items-center gap-1">
                   {speedPresets.map((preset) => {
                     const isActive = isPlaying && timeSpeed === preset.value && playDirection === 'forward';
                     return (
-                      <button
+          <button
                         key={`forward-${preset.value}`}
                         onClick={() => handleSpeedButtonClick(preset.value, 'forward')}
                         className={`p-1.5 rounded transition-colors ${
@@ -294,21 +309,21 @@ const TimeControl = React.memo(() => {
                         >
                           <polyline points="9 18 15 12 9 6"></polyline>
                         </svg>
-                      </button>
+          </button>
                     );
                   })}
                 </div>
-              </div>
+        </div>
 
               {/* 时间差显示和"现在"按钮 */}
               <div className="flex items-center gap-2">
                 {absTimeDiff > 0.01 && realTime ? (
                   <>
-                    <div className={`text-xs font-medium ${timeDiff > 0 ? 'text-blue-400' : 'text-orange-400'}`}>
-                      {timeDiff > 0 
-                        ? (lang === 'zh' ? `未来 ${formatTimeDiff(timeDiff)}` : `Future ${formatTimeDiff(timeDiff)}`)
-                        : (lang === 'zh' ? `过去 ${formatTimeDiff(absTimeDiff)}` : `Past ${formatTimeDiff(absTimeDiff)}`)
-                      }
+            <div className={`text-xs font-bold ${timeDiff > 0 ? 'text-blue-400' : 'text-orange-400'}`}>
+              {timeDiff > 0 
+                ? (lang === 'zh' ? `未来 ${formatTimeDiff(timeDiff)}` : `Future ${formatTimeDiff(timeDiff)}`)
+                : (lang === 'zh' ? `过去 ${formatTimeDiff(absTimeDiff)}` : `Past ${formatTimeDiff(absTimeDiff)}`)
+              }
                     </div>
                     <button
                       onClick={handleNowClick}
@@ -319,24 +334,24 @@ const TimeControl = React.memo(() => {
                     </button>
                   </>
                 ) : (
-                  <div className="text-xs font-medium text-green-400">
+                  <div className="text-xs font-bold text-green-400">
                     {lang === 'zh' ? '现在' : 'Now'}
-                  </div>
-                )}
+            </div>
+          )}
               </div>
               
               {/* 精度警告 */}
-              {showPrecisionWarning && (
-                <div className="text-xs text-yellow-400 flex items-center gap-1 font-medium">
-                  <span>⚠️</span>
-                  <span>{lang === 'zh' ? '时移较远，精度可能降低' : 'Time shift is large, accuracy may be reduced'}</span>
-                </div>
-              )}
+          {showPrecisionWarning && (
+            <div className="text-xs text-yellow-400 flex items-center gap-1 font-medium">
+              <span>⚠️</span>
+              <span>{lang === 'zh' ? '时移较远，精度可能降低' : 'Time shift is large, accuracy may be reduced'}</span>
             </div>
-          </div>
-      
+          )}
+        </div>
+        </div>
+
       {/* 隐藏的日期输入框，用于直接打开日历选择器 */}
-      <input
+            <input
         ref={dateInputRef}
         type="date"
         value={formatDate(displayTime)}
@@ -344,7 +359,7 @@ const TimeControl = React.memo(() => {
         className="hidden"
         max={formatDate(new Date(2100, 11, 31))}
         min={formatDate(new Date(1900, 0, 1))}
-      />
+            />
     </>  
   );
 });
