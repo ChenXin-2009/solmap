@@ -81,11 +81,12 @@ const LABEL_CONFIG = {
 
 // 聚焦配置
 const FOCUS_CONFIG = {
-  // 🔧 聚焦距离倍数（相对于行星半径，值越大相机离行星越远）
-  distanceMultiplier: 20,
+  // 🔧 聚焦距离倍数（相对于行星半径，值越小越接近行星表面）
+  // 设置为 0.5 允许用户缩放到行星表面查看细节（类似地图软件无限放大）
+  distanceMultiplier: 0.5,
   
-  // 🔧 最小聚焦距离（AU，确保相机不会太近）
-  minDistance: 0.01,
+  // 🔧 最小聚焦距离（AU，支持极小值以实现无限放大）
+  minDistance: 0.00001,
 };
 
 // 初始相机位置
@@ -377,13 +378,19 @@ export default function SolarSystemCanvas3D() {
         const currentState = useSolarSystemStore.getState();
         const currentBodies = currentState.celestialBodies;
 
-        // 更新行星位置和自转
+        // 更新行星位置、自转和 LOD
         currentBodies.forEach((body: any) => {
           const key = body.name.toLowerCase();
           const planet = planetsRef.current.get(key);
           if (planet) {
             planet.updatePosition(body.x, body.y, body.z);
             planet.updateRotation(deltaTime);
+            
+            // 计算相机到星球的距离并更新 LOD
+            const planetWorldPos = new THREE.Vector3(body.x, body.y, body.z);
+            const cameraPos = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
+            const distance = planetWorldPos.distanceTo(cameraPos);
+            planet.updateLOD(distance);
             
             // 更新轨道渐变（如果轨道存在）
             const orbit = orbitsRef.current.get(key);
@@ -399,6 +406,12 @@ export default function SolarSystemCanvas3D() {
         if (sunPlanet) {
           sunPlanet.updatePosition(0, 0, 0);
           sunPlanet.updateRotation(deltaTime);
+          
+          // 计算相机到太阳的距离并更新 LOD
+          const sunWorldPos = new THREE.Vector3(0, 0, 0);
+          const cameraPos = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
+          const sunDistance = sunWorldPos.distanceTo(cameraPos);
+          sunPlanet.updateLOD(sunDistance);
           
           // 太阳标签始终显示（不参与重叠检测）
           const sunLabel = labelsRef.current.get('sun');
@@ -722,9 +735,10 @@ export default function SolarSystemCanvas3D() {
           
           // 平滑移动相机到行星位置（放大显示）
           const targetPosition = new THREE.Vector3(target.body.x, target.body.y, target.body.z);
-          // 根据行星大小计算合适的观察距离（确保相机不会进入行星内部）
+          // 根据行星大小计算合适的观察距离
+          // 新特性：相机可以无限放大到行星表面（类似地图软件），用户可继续缩放查看细节
           const planetRadius = target.planet.getRealRadius();
-          // 使用配置的倍数以确保相机不会进入行星内部，同时能看清细节
+          // 使用极小的倍数（0.5）使初始聚焦距离非常接近行星表面
           const minDistance = Math.max(planetRadius * FOCUS_CONFIG.distanceMultiplier, FOCUS_CONFIG.minDistance);
           const targetDistance = minDistance;
           
@@ -739,7 +753,7 @@ export default function SolarSystemCanvas3D() {
             return targetPosition.clone();
           };
           
-          // 传入行星半径，让 CameraController 动态调整最小距离防止穿模
+          // 传入行星半径，让 CameraController 允许无限放大
           cameraControllerRef.current.focusOnTarget(targetPosition, targetDistance, trackingTargetGetter, planetRadius);
         }
       };

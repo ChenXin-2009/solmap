@@ -15,7 +15,7 @@
 
 import * as THREE from 'three';
 import type { CelestialBody } from '@/lib/astronomy/orbit';
-import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS } from '@/lib/config/visualConfig';
+import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS, PLANET_LOD_CONFIG } from '@/lib/config/visualConfig';
 
 // 真实行星半径（AU单位）
 // 1 AU = 149,597,870 km
@@ -52,6 +52,8 @@ export class Planet {
   private glowMesh: THREE.Mesh | null = null; // 太阳光晕网格
   private rainbowSprites: THREE.Sprite[] = [];
   private isSun: boolean = false; // 是否为太阳
+  private currentSegments: number = 32; // 当前分段数（用于平滑过渡）
+  private targetSegments: number = 32; // 目标分段数
 
   constructor(config: PlanetConfig) {
     this.rotationSpeed = config.rotationSpeed;
@@ -64,9 +66,10 @@ export class Planet {
     // 使用真实半径创建行星
     const radius = this.realRadius;
 
-    // 创建几何体（根据半径动态调整细节）
-    const segments = Math.max(16, Math.min(64, Math.floor(radius * 1000)));
-    this.geometry = new THREE.SphereGeometry(radius, segments, segments);
+    // 创建几何体（初始化为基础分段数）
+    this.targetSegments = PLANET_LOD_CONFIG.baseSegments;
+    this.currentSegments = PLANET_LOD_CONFIG.baseSegments;
+    this.geometry = new THREE.SphereGeometry(radius, this.currentSegments, this.currentSegments);
 
     // 创建材质
     this.material = new THREE.MeshStandardMaterial({
@@ -326,16 +329,57 @@ export class Planet {
   }
 
   /**
-   * 更新 LOD（根据距离动态调整细节）
+   * 更新 LOD（根据相机距离动态调整星球的几何细节）
+   * 
+   * 原理：
+   * - 当相机远离时，分段数减少以优化性能
+   * - 当相机靠近时，分段数增加以显示更多细节，消除棱角感
+   * - 使用平滑过渡避免频繁重建几何体
+   * 
+   * @param distance 相机到星球中心的距离（world units）
    */
   updateLOD(distance: number): void {
-    const segments = Math.max(8, Math.min(64, Math.floor(100 / (distance + 1))));
-    if (this.geometry.parameters.widthSegments !== segments) {
-      this.geometry.dispose();
-      const radius = this.geometry.parameters.radius;
-      this.geometry = new THREE.SphereGeometry(radius, segments, segments);
-      this.mesh.geometry = this.geometry;
+    // 根据距离计算目标分段数
+    // 使用对数缩放，使分段数的变化更平缓
+    const normalizedDistance = Math.max(0.1, distance / PLANET_LOD_CONFIG.transitionDistance);
+    // 使用反向函数：距离越近，分段数越多
+    // baseSegments * 2 = 当距离为 transitionDistance 时的分段数
+    const targetSegmentsRaw = PLANET_LOD_CONFIG.baseSegments * (1 + 1 / Math.max(0.5, normalizedDistance));
+    this.targetSegments = Math.round(
+      Math.max(PLANET_LOD_CONFIG.minSegments, 
+               Math.min(PLANET_LOD_CONFIG.maxSegments, targetSegmentsRaw))
+    );
+
+    // 平滑过渡分段数（避免频繁重建）
+    const segmentDiff = this.targetSegments - this.currentSegments;
+    if (Math.abs(segmentDiff) > 0) {
+      // 使用平滑系数进行缓动过渡
+      const smoothedChange = Math.round(segmentDiff * PLANET_LOD_CONFIG.smoothness);
+      const newSegments = this.currentSegments + smoothedChange;
+      
+      // 只在分段数变化达到阈值时才重建几何体（避免过于频繁的重建）
+      if (newSegments !== this.currentSegments) {
+        this.currentSegments = newSegments;
+        this.rebuildGeometry();
+      }
     }
+  }
+
+  /**
+   * 重建星球几何体（更换分段数）
+   * 释放旧几何体，创建新几何体
+   */
+  private rebuildGeometry(): void {
+    const radius = this.geometry.parameters.radius;
+    
+    // 释放旧几何体
+    this.geometry.dispose();
+    
+    // 创建新几何体
+    this.geometry = new THREE.SphereGeometry(radius, this.currentSegments, this.currentSegments);
+    
+    // 更新网格的几何体
+    this.mesh.geometry = this.geometry;
   }
 
   getMesh(): THREE.Mesh {

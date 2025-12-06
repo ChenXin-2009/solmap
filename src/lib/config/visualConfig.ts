@@ -3,6 +3,19 @@
 // 使用建议：
 // - 在开发时可直接编辑这些常量来微调视觉效果；生产环境可通过环境或设置面板覆盖。
 // - 高开销设置（如阴影、极高的轨道点数、非常大的阴影贴图）会影响性能，谨慎使用。
+//
+// ✨ 新特性：无限放大与防穿透约束
+// 相机现在支持类似地图软件的无限放大功能，允许用户持续缩放直到接近行星表面查看细节。
+// 核心特性：
+// 1. 无限放大：CameraController.minDistance 设为极小值 (0.00001)
+// 2. 防穿透约束：当相机穿过行星表面时，自动将焦点（OrbitControls.target）
+//    沿着行星中心→相机的方向移动到行星表面，使用户始终可以看清行星表面而不会穿透。
+// 3. 实现细节：
+//    - focusOnTarget 保存行星半径和位置
+//    - applyPenetrationConstraint 每帧检查并应用约束
+//    - 当缩放或旋转时自动调整焦点位置以保持在行星表面外
+// 4. 用户体验：点击行星后可继续滚轮放大，可以看清行星表面纹理和细节
+//
 
 /**
  * 轨道颜色池
@@ -112,4 +125,251 @@ export const ORBIT_GRADIENT_CONFIG = {
  */
 export const ORBIT_RENDER_CONFIG = {
   lineWidth: 2,
+};
+
+/**
+ * 轨道可见性与遮挡控制
+ * - hideAtScale: 当场景缩放（或世界单位缩放因子）小于此阈值时隐藏轨道（避免在极小尺度下大量轨道遮挡）
+ * - preventOrbitOverSun: 当轨道与太阳视线重叠时尝试降低轨道不透明度或隐藏，防止遮挡太阳视觉效果
+ */
+export const ORBIT_VISIBILITY_CONFIG = {
+  hideAtScale: 0.0005,
+  preventOrbitOverSun: true,
+  fadeDuration: 0.6, // 秒，轨道显示/隐藏的渐变时长
+};
+
+// 轨道屏幕空间可见性阈值（以像素为单位）
+// 当轨道在屏幕上的投影半径小于 `pixelHideThreshold` 时，会开始淡出；
+// 在 `pixelHideThreshold + pixelFadeRange` 之外完全隐藏。
+export const ORBIT_SCREEN_THRESHOLD = {
+  pixelHideThreshold: 5,
+  pixelFadeRange: 50,
+};
+
+/**
+ * 相机相关配置
+ * - minDistanceToBody: 距行星/卫星的最小安全距离（世界单位），防止相机穿透天体导致黑圆
+ * - initialTiltDeg: 初始视角俯仰角（度），默认从接近垂直俯视过渡到此角度
+ * - initialTransitionSec: 首次加载时从俯视到斜视的动画时长（秒）
+ */
+export const CAMERA_CONFIG = {
+  minDistanceToBody: 0.002, // 以天体半径为参考的比例（在代码中会乘以目标半径）
+  initialTiltDeg: 30,
+  initialTransitionSec: 1.2,
+};
+
+/**
+ * 标尺（ScaleRuler）配置
+ */
+export const SCALE_RULER_CONFIG = {
+  enabled: true,
+  unit: 'km',
+  // 屏幕上最小/最大像素长度用于缩放显示（避免太小或太大）
+  minPx: 40,
+  maxPx: 220,
+};
+
+/**
+ * 纹理加载策略
+ * - lowResPlaceholder: 本地或打包的低分辨率占位图（用于默认展示）
+ * - highResDistanceThreshold: 当相机距离目标小于该值时开始加载高分辨率 NASA 纹理
+ *   距离单位与 CameraController 距离计算保持一致
+ */
+export const TEXTURE_LOADING_CONFIG = {
+  lowResPlaceholder: '/textures/placeholder-lowres.jpg',
+  highResDistanceThreshold: 0.8, // 当相机相对目标距离小于此值时加载高分辨率贴图
+  preferGPU: true,
+};
+
+/**
+ * 卫星相关全局配置
+ * - enabled: 是否显示并模拟卫星
+ * - defaultScale: 卫星相对于真实半径的渲染缩放因子（可用于放大小卫星以便可视化）
+ */
+export const SATELLITE_CONFIG = {
+  enabled: true,
+  defaultScale: 1.0,
+  // 当选中父行星并聚焦时，摄像机与父行星的距离小于 (parentRadius * showOnFocusMultiplier) 才显示卫星
+  // 值越大需要更靠近父行星才会显示卫星
+  showOnFocusMultiplier: 15,
+};
+
+/**
+ * ==================== 相机控制器配置（CameraController） ====================
+ * 防穿透与无限放大相关参数
+ */
+
+/**
+ * 相机防穿透约束配置
+ * 当相机接近或穿过行星表面时的约束行为
+ */
+export const CAMERA_PENETRATION_CONFIG = {
+  // 防穿透安全距离倍数：相对于行星半径的倍数。
+  // 当相机距离 < 行星半径 * 此倍数时，触发防穿透约束
+  // 值越大，约束触发越早；通常设为 1.0-1.5
+  safetyDistanceMultiplier: 1.05,
+  
+  // 防穿透约束的平滑过渡速度（0-1），用于平滑调整焦点位置
+  // 值越大约束响应越快，值越小约束更平缓。建议范围：0.05-0.3
+  constraintSmoothness: 0.15,
+  
+  // 约束应用时是否同时调整相机距离以避免跳跃
+  // true：焦点和相机都调整；false：仅调整焦点
+  adjustCameraDistance: true,
+  
+  // 当检测到穿透时是否立即强制修正位置（true 会把相机和焦点直接设置到安全位置以防止继续穿透）
+  // false 则使用平滑 lerp 过渡（可能在快速滚轮操作下无法完全阻止穿透）
+  forceSnap: true,
+  
+  // 启用防穿透约束的调试模式
+  // true：会在控制台打印约束触发和参数信息
+  debugMode: true,
+};
+
+/**
+ * 相机缩放配置
+ * 控制相机缩放行为和速度
+ */
+export const CAMERA_ZOOM_CONFIG = {
+  // 最小缩放距离（极小值以支持无限放大如地图软件）
+  // 更小的值允许更接近天体。建议：0.00001-0.0001
+  minDistance: 0.00001,
+  
+  // 最大缩放距离
+  // 更大的值允许更远距离观看。建议：500-2000
+  maxDistance: 1000,
+  
+  // 缩放速度因子（OrbitControls 内部使用）
+  // 值越大鼠标滚轮缩放越敏感。建议范围：1.0-2.5
+  zoomSpeed: 1.5,
+  
+  // 基础缩放因子（滚轮缩放的基础倍数）
+  // 影响每次滚轮事件的缩放幅度。建议范围：0.2-0.6
+  zoomBaseFactor: 0.4,
+  
+  // 缩放缓动速度（0-1之间，越大越快）
+  // 用于平滑过渡缩放效果。建议范围：0.1-0.3
+  zoomEasingSpeed: 0.2,
+};
+
+/**
+ * 相机聚焦配置
+ * 点击行星聚焦时的行为
+ */
+export const CAMERA_FOCUS_CONFIG = {
+  // 聚焦动画的插值速度（0-1，越大越快）
+  // 控制相机平滑移动到聚焦位置的速度。建议范围：0.1-0.3
+  focusLerpSpeed: 0.2,
+  
+  // 聚焦动画完成阈值（距离小于此值认为完成）
+  // 用于判断聚焦动画是否完成。建议：0.001-0.05
+  focusThreshold: 0.01,
+  
+  // 聚焦后初始相机距离相对于行星半径的倍数
+  // 值越大相机离行星越远。建议范围：3-8
+  focusDistanceMultiplier: 5,
+  
+  // 防穿透时的最小距离倍数（相对于行星半径）
+  // 当相机缩放时不会穿过此距离。建议范围：0.1-0.5
+  minDistanceMultiplier: 0.1,
+};
+
+/**
+ * 相机跟踪配置
+ * 聚焦后跟踪行星运动的行为
+ */
+export const CAMERA_TRACKING_CONFIG = {
+  // 跟踪时的插值速度（0-1，越大越快，值越大跟随越紧密）
+  // 用于平滑跟踪行星运动。建议范围：0.05-0.25
+  trackingLerpSpeed: 0.15,
+};
+
+/**
+ * 相机视角配置
+ * 相机的投影和视角参数
+ */
+export const CAMERA_VIEW_CONFIG = {
+  // 相机视野角度（FOV，度），值越大视野越广，边缘畸变越明显
+  // 建议范围：45-75
+  fov: 45,
+  
+  // 视角平滑过渡速度（0-1，越大越快）
+  // 用于平滑修改相机视野角度。建议范围：0.1-0.25
+  fovTransitionSpeed: 0.15,
+  
+  // 动态近平面调整倍数：当相机靠近行星时，近平面 = 距离 * 此倍数
+  // 防止相机靠近时因近平面裁剪而导致行星消失
+  // ⚠️ 关键参数：值越小近平面调整越激进，允许更接近行星
+  // 0.01 = 当距离为1时近平面为0.01，非常接近（推荐用于无限放大）
+  dynamicNearPlaneMultiplier: 0.01,
+  
+  // 最小近平面距离（绝对值）
+  // 防止近平面过小导致深度精度问题，但要足够小以支持极近距离观看
+  // ⚠️ 关键参数：0.00001 = 10纳米级，足够支持接近观看
+  minNearPlane: 0.00001,
+  
+  // 最大远平面距离（绝对值）
+  // 太阳系超大尺度需要很大的远平面。建议：1e10-1e12
+  maxFarPlane: 1e12,
+};
+
+/**
+ * 相机操作配置
+ * 控制各种输入操作的响应
+ */
+export const CAMERA_OPERATION_CONFIG = {
+  // 阻尼系数（0-1，值越小缓动越明显，惯性越强）
+  // 控制相机旋转/平移的惯性效果。建议范围：0.01-0.1
+  dampingFactor: 0.04,
+  
+  // 平移速度因子
+  // 值越大鼠标/触摸平移越敏感。建议范围：0.3-1.0
+  panSpeed: 0.6,
+  
+  // 旋转速度因子
+  // 值越大鼠标/触摸旋转越敏感。建议范围：0.5-1.5
+  rotateSpeed: 0.8,
+  
+  // 极角平滑过渡速度（0-1，越大越快）
+  // 用于平滑调整相机的上下视角。建议范围：0.05-0.15
+  polarAngleTransitionSpeed: 0.08,
+  
+  // 方位角平滑过渡速度（0-1，越大越快）
+  // 用于平滑调整相机的左右视角。建议范围：0.05-0.15
+  azimuthalAngleTransitionSpeed: 0.08,
+};
+
+/**
+ * 星球 LOD（Level of Detail）动态细节配置
+ * 
+ * 功能：根据相机距离动态调整星球的几何体面数（分段数）
+ * - 远距离时使用较少分段数，优化渲染性能
+ * - 近距离时增加分段数，显示更多细节以消除棱角感
+ * 
+ * 原理：
+ * - baseSegments: 基础分段数（相机距离约为 30 AU 时的分段数）
+ * - minSegments: 最少分段数（即使相机很远也不会低于此值）
+ * - maxSegments: 最多分段数（即使相机很近也不会超过此值）
+ * - transitionDistance: 控制LOD过渡速度的参考距离
+ *   - 每 1 个 transitionDistance 的接近，分段数会增加相应倍数
+ * - smoothness: 分段数变化的平滑度（0-1），值越大越平滑但变化越慢
+ */
+export const PLANET_LOD_CONFIG = {
+  // 基础分段数（用于中等距离）
+  baseSegments: 32,
+  
+  // 最小分段数（远距离时的下限，降低资源消耗）
+  minSegments: 16,
+  
+  // 最大分段数（近距离时的上限，防止过度细分）
+  maxSegments: 128,
+  
+  // LOD 过渡参考距离（决定分段数随距离变化的速率）
+  // 越小越敏感：相机每靠近一个单位分段数增加越多
+  // 建议范围：5-20
+  transitionDistance: 10,
+  
+  // 分段数平滑过渡速度（0-1，值越大变化越快）
+  // 越小越平滑但反应越慢。建议范围：0.1-0.3
+  smoothness: 0.15,
 };

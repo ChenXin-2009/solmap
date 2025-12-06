@@ -3,13 +3,13 @@ git status
 	如果显示 Changes not staged for commit 或 Untracked files：
 
 git add .
-git commit -m "添加了太阳光晕，优化了代码结构"
+git commit -m "解决视锥体剔除问题，优化行星渲染"
 
 git checkout main
 git pull origin main
 
 git add .
-git commit -m "Release 2.2.1: 添加了太阳光晕，优化了代码结构"
-git tag v2.2.1
+git commit -m "Release 2.2.2: 解决视锥体剔除问题，优化行星渲染"
+git tag v2.2.2
 git push origin main
-git push origin v2.2.1
+git push origin v2.2.2
