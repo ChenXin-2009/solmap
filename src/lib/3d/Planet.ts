@@ -15,42 +15,7 @@
 
 import * as THREE from 'three';
 import type { CelestialBody } from '@/lib/astronomy/orbit';
-
-// ==================== 可调参数配置 ====================
-// ⚙️ 以下参数可在文件顶部调整，影响行星显示效果
-
-// 标记圈配置
-const MARKER_CONFIG = {
-  // 🔧 标记圈大小（像素，固定大小）
-  size: 20,
-  
-  // 🔧 标记圈线条宽度（像素）
-  strokeWidth: 2,
-  
-  // 🔧 标记圈基础透明度（完全不透明）
-  baseOpacity: 1.0,
-  
-  // 🔧 渐隐速度（0-1，值越大变化越快）
-  fadeSpeed: 0.2,
-  
-  // 🔧 最小透明度（低于此值不显示）
-  minOpacity: 0.1,
-};
-
-// 太阳光晕配置
-const SUN_GLOW_CONFIG = {
-  // 🔧 是否启用太阳光晕
-  enabled: true,
-  
-  // 🔧 光晕半径倍数（相对于太阳半径）
-  radiusMultiplier: 1.5,
-  
-  // 🔧 光晕颜色（十六进制）
-  color: 0xffffaa,
-  
-  // 🔧 光晕透明度（0-1）
-  opacity: 0.6,
-};
+import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS } from '@/lib/config/visualConfig';
 
 // 真实行星半径（AU单位）
 // 1 AU = 149,597,870 km
@@ -85,6 +50,7 @@ export class Planet {
   private currentOpacity: number = 0; // 当前透明度（用于渐隐）
   private targetOpacity: number = 0; // 目标透明度
   private glowMesh: THREE.Mesh | null = null; // 太阳光晕网格
+  private rainbowSprites: THREE.Sprite[] = [];
   private isSun: boolean = false; // 是否为太阳
 
   constructor(config: PlanetConfig) {
@@ -112,7 +78,7 @@ export class Planet {
     // 创建网格
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     
-    // 如果是太阳，创建光晕效果
+    // 如果是太阳，创建光晕效果（使用屏幕空间 Sprite 替代嵌套球体）
     if (this.isSun && SUN_GLOW_CONFIG.enabled) {
       this.createSunGlow();
     }
@@ -124,41 +90,137 @@ export class Planet {
    * 创建太阳光晕效果（多层光晕，模拟发光）
    */
   private createSunGlow(): void {
-    // 创建多层光晕，从内到外逐渐变透明
-    const glowLayers = [
-      { radius: 1.2, opacity: 0.8, color: 0xffffaa },
-      { radius: 1.5, opacity: 0.5, color: 0xffff88 },
-      { radius: 2.0, opacity: 0.3, color: 0xffff66 },
-    ];
-    
-    glowLayers.forEach((layer) => {
-      const glowRadius = this.realRadius * layer.radius;
-      const glowGeometry = new THREE.SphereGeometry(glowRadius, 32, 32);
-      
-      const glowMaterial = new THREE.MeshBasicMaterial({
-        color: layer.color,
-        transparent: true,
-        opacity: layer.opacity,
-        side: THREE.BackSide, // 只渲染背面，形成光晕效果
-        depthWrite: false, // 不写入深度缓冲，避免遮挡
-      });
-      
-      const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
-      this.mesh.add(glowMesh);
-    });
-    
-    // 保存最外层光晕的引用（用于后续更新）
-    const outerGlowRadius = this.realRadius * SUN_GLOW_CONFIG.radiusMultiplier;
-    const outerGlowGeometry = new THREE.SphereGeometry(outerGlowRadius, 32, 32);
-    const outerGlowMaterial = new THREE.MeshBasicMaterial({
-      color: SUN_GLOW_CONFIG.color,
+    // 使用 canvas 生成径向渐变纹理，作为 Sprite 的贴图
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    // 中心到外部的渐变：白色内核 -> 太阳色 -> 透明
+    const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0.0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.12, 'rgba(255,245,220,0.95)');
+    grad.addColorStop(0.28, 'rgba(255,220,120,0.8)');
+    grad.addColorStop(0.5, 'rgba(255,180,80,0.45)');
+    grad.addColorStop(0.85, 'rgba(255,140,40,0.12)');
+    grad.addColorStop(1.0, 'rgba(0,0,0,0)');
+
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+
+    // 创建纹理
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+
+    // SpriteMaterial 使用 AdditiveBlending 来模拟发光叠加
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      color: 0xffffff,
       transparent: true,
-      opacity: SUN_GLOW_CONFIG.opacity,
-      side: THREE.BackSide,
+      blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
-    this.glowMesh = new THREE.Mesh(outerGlowGeometry, outerGlowMaterial);
-    this.mesh.add(this.glowMesh);
+
+    const sprite = new THREE.Sprite(spriteMaterial);
+    // 初始大小依据真实半径（后续在 updateGlow 中根据相机距离调整）
+    const baseSize = this.realRadius * SUN_GLOW_CONFIG.radiusMultiplier * 2; // world units
+    sprite.scale.set(baseSize, baseSize, 1);
+    sprite.renderOrder = 999; // 确保在前面渲染
+    this.glowMesh = sprite as unknown as THREE.Mesh; // 复用字段名，类型为 Mesh|null 原因兼容旧代码
+    this.mesh.add(sprite);
+
+    // 创建彩虹色的散射层（多层、低不透明度、叠加）
+    this.rainbowSprites = [];
+    for (const layer of SUN_RAINBOW_LAYERS) {
+      const csize = 512;
+      const cCanvas = document.createElement('canvas');
+      cCanvas.width = csize;
+      cCanvas.height = csize;
+      const cctx = cCanvas.getContext('2d')!;
+
+      // 渐变从半透明色到完全透明
+      const cgrad = cctx.createRadialGradient(csize / 2, csize / 2, 0, csize / 2, csize / 2, csize / 2);
+      // 中心非常透明，让主光晕保持主色
+      cgrad.addColorStop(0.0, 'rgba(0,0,0,0)');
+      cgrad.addColorStop(0.6, `${layer.color}`);
+      cgrad.addColorStop(1.0, 'rgba(0,0,0,0)');
+
+      cctx.fillStyle = cgrad;
+      cctx.fillRect(0, 0, csize, csize);
+
+      const ctexture = new THREE.CanvasTexture(cCanvas);
+      ctexture.needsUpdate = true;
+
+      const mat = new THREE.SpriteMaterial({
+        map: ctexture,
+        color: 0xffffff,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        opacity: layer.opacity,
+      });
+
+      const spr = new THREE.Sprite(mat);
+      const baseSize = this.realRadius * layer.radiusMultiplier * 2;
+      spr.scale.set(baseSize, baseSize, 1);
+      spr.renderOrder = 998; // 稍后于主光晕或之前，根据需要
+      this.mesh.add(spr);
+      this.rainbowSprites.push(spr);
+    }
+  }
+
+  /**
+   * 每帧更新太阳光晕的大小/强度以模拟散射（基于相机距离和视角）
+   */
+  updateGlow(camera: THREE.Camera): void {
+    if (!this.isSun || !this.glowMesh) return;
+    // glowMesh 实际为 Sprite
+    const sprite = this.glowMesh as unknown as THREE.Sprite;
+    // 计算太阳到相机的距离
+    const sunWorldPos = new THREE.Vector3();
+    this.mesh.getWorldPosition(sunWorldPos);
+    const camPos = new THREE.Vector3();
+    camera.getWorldPosition(camPos);
+    const dist = sunWorldPos.distanceTo(camPos);
+
+    // 控制屏幕空间大小：保持在一定的视觉角度范围内
+    // 目标屏幕半径（world units）与相机距离的比例关系： size ~ apparentAngle * dist
+    // 设定一个视觉角度（弧度）随 sun radius 调节
+    const apparentAngle = Math.max(0.02, Math.min(0.8, (this.realRadius * 3) / (dist / 10)));
+    const targetSize = dist * apparentAngle;
+
+    // 平滑缩放
+    const current = sprite.scale.x;
+    const lerped = current + (targetSize - current) * 0.12;
+    sprite.scale.set(lerped, lerped, 1);
+
+    // 根据距离调整不透明度（近时强，远时弱）
+    const mat = sprite.material as THREE.SpriteMaterial;
+    if (mat) {
+      const intensity = Math.max(0.2, Math.min(1.6, (200 / (dist + 50))));
+      mat.opacity = Math.min(1.0, SUN_GLOW_CONFIG.opacity * intensity);
+      mat.needsUpdate = true;
+    }
+
+    // 更新彩虹散射层：根据相机距离略微扩大并降低不透明度，制造色散效果
+    if (this.rainbowSprites && this.rainbowSprites.length > 0) {
+      for (let i = 0; i < this.rainbowSprites.length; i++) {
+        const rs = this.rainbowSprites[i];
+        const layer = SUN_RAINBOW_LAYERS[i];
+        const currentRs = rs.scale.x;
+        const targetRs = lerped * (layer.radiusMultiplier / SUN_GLOW_CONFIG.radiusMultiplier);
+        const newRs = currentRs + (targetRs - currentRs) * 0.08;
+        rs.scale.set(newRs, newRs, 1);
+        const rmat = rs.material as THREE.SpriteMaterial;
+        if (rmat) {
+          // 使远处更暗，近处更明显
+          const rIntensity = Math.max(0.02, Math.min(0.6, (120 / (dist + 30))));
+          rmat.opacity = layer.opacity * rIntensity;
+          rmat.needsUpdate = true;
+        }
+      }
+    }
   }
 
   /**

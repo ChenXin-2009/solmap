@@ -13,24 +13,7 @@
 
 import * as THREE from 'three';
 import type { OrbitalElements } from '@/lib/astronomy/orbit';
-
-// ==================== 可调参数配置 ====================
-// ⚙️ 以下参数可在文件顶部调整，影响轨道显示效果
-
-// ==================== 可调参数配置 ====================
-// ⚙️ 以下参数可在文件顶部调整，影响轨道渐变效果
-
-// 轨道渐变配置
-const ORBIT_GRADIENT_CONFIG = {
-  // 🔧 是否启用渐变效果（从行星位置向运动反方向渐隐）
-  enabled: true,
-  
-  // 🔧 最亮点透明度（行星位置附近，0-1，值越大越亮）
-  maxOpacity: 1.0,
-  
-  // 🔧 最暗点透明度（运动反方向远处，0-1，值越小越透明）
-  minOpacity: 0.1,
-};
+import { ORBIT_GRADIENT_CONFIG, ORBIT_RENDER_CONFIG } from '@/lib/config/visualConfig';
 
 export class OrbitCurve {
   private line: THREE.Line;
@@ -164,7 +147,7 @@ export class OrbitCurve {
         vertexColors: true,
         transparent: true,
         opacity: 1.0,
-        linewidth: 1,
+        linewidth: ORBIT_RENDER_CONFIG.lineWidth,
       });
     } else {
       // 不使用渐变，使用固定透明度和颜色
@@ -175,7 +158,7 @@ export class OrbitCurve {
         color: threeColor,
         opacity: 0.4,
         transparent: true,
-        linewidth: 1,
+        linewidth: ORBIT_RENDER_CONFIG.lineWidth,
       });
     }
 

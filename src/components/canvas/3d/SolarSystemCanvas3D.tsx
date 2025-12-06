@@ -32,21 +32,12 @@ import { Raycaster } from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import ScaleRuler from './ScaleRuler';
 import SettingsMenu from '@/components/SettingsMenu';
+import { ORBIT_COLORS, SUN_LIGHT_CONFIG, ORBIT_CURVE_POINTS } from '@/lib/config/visualConfig';
 
 // ==================== 可调参数配置 ====================
 // ⚙️ 以下参数可在文件顶部调整，影响 3D 场景显示效果
 
-// 轨道颜色配置（与2D版本一致）
-const ORBIT_COLORS: Record<string, string> = {
-  mercury: '#c4cbcf',
-  venus: '#fcc307',
-  earth: '#22a2c3',
-  mars: '#f5391c',
-  jupiter: '#D8CA9D',
-  saturn: '#FAD5A5',
-  uranus: '#4FD0E7',
-  neptune: '#4B70DD',
-};
+// 轨道颜色使用集中配置 `ORBIT_COLORS`（位于 src/lib/config/visualConfig.ts）
 
 // 行星自转速度（弧度/秒，简化值）
 const ROTATION_SPEEDS: Record<string, number> = {
@@ -109,7 +100,6 @@ const INITIAL_CAMERA_POSITION = {
 // - 上下角度（polarAngle）：0度 = 俯视（垂直于轨道平面），90度 = 水平视角，180度 = 仰视
 // - 左右角度（azimuthalAngle）：0度 = 正前方，90度 = 右侧，-90度 = 左侧，180度/-180度 = 正后方
 const CAMERA_ANGLE_CONFIG = {
-  // 🔧 初始上下角度（度）：页面加载时的相机上下角度，0度 = 俯视
   initialPolarAngle: 90,
   
   // 🔧 初始左右角度（度）：页面加载时的相机左右角度，0度 = 正前方
@@ -128,8 +118,7 @@ const CAMERA_ANGLE_CONFIG = {
   smoothTransition: true,
 };
 
-// 🔧 轨道曲线点数（值越大轨道越平滑，但性能开销越大）
-const ORBIT_CURVE_POINTS = 300;
+// 太阳光与轨道点数配置已集中到 `src/lib/config/visualConfig.ts`
 
 export default function SolarSystemCanvas3D() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -242,9 +231,20 @@ export default function SolarSystemCanvas3D() {
       
       controls.enabled = true;
 
-      // 添加点光源（太阳光）- 增强太阳的发光效果
-      const sunLight = new THREE.PointLight(0xffffaa, 5, 200); // 增加强度和范围
+      // 添加点光源（太阳光）- 使用顶部的 SUN_LIGHT_CONFIG 可快速调整
+      const sunLight = new THREE.PointLight(
+        SUN_LIGHT_CONFIG.color,
+        SUN_LIGHT_CONFIG.intensity,
+        SUN_LIGHT_CONFIG.distance,
+        SUN_LIGHT_CONFIG.decay
+      );
       sunLight.position.set(0, 0, 0);
+      sunLight.castShadow = !!SUN_LIGHT_CONFIG.castShadow;
+      if (SUN_LIGHT_CONFIG.castShadow && sunLight.shadow) {
+        sunLight.shadow.mapSize.width = SUN_LIGHT_CONFIG.shadowMapSize;
+        sunLight.shadow.mapSize.height = SUN_LIGHT_CONFIG.shadowMapSize;
+        sunLight.shadow.bias = -0.0001;
+      }
       scene.add(sunLight);
       
       // 添加环境光，使行星更清晰可见
@@ -405,6 +405,14 @@ export default function SolarSystemCanvas3D() {
           if (sunLabel && sunLabel.element) {
             sunLabel.element.style.opacity = '1';
             sunLabel.element.style.display = 'block';
+          }
+          
+          // 每帧更新太阳的屏幕空间光晕（如果 Planet 实例提供该方法）
+          try {
+            // @ts-ignore - updateGlow 可能未在类型定义中声明
+            sunPlanet.updateGlow(camera);
+          } catch (err) {
+            // 忽略错误，保持渲染循环稳定
           }
         }
 
