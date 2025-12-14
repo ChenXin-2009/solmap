@@ -24,6 +24,8 @@ import { SceneManager } from '@/lib/3d/SceneManager';
 import { CameraController } from '@/lib/3d/CameraController';
 import { Planet } from '@/lib/3d/Planet';
 import { OrbitCurve } from '@/lib/3d/OrbitCurve';
+import { SatelliteOrbit } from '@/lib/3d/SatelliteOrbit';
+import { SATELLITE_DEFINITIONS } from '@/lib/astronomy/orbit';
 import { dateToJulianDay } from '@/lib/astronomy/time';
 import { ORBITAL_ELEMENTS } from '@/lib/astronomy/orbit';
 import { planetNames } from '@/lib/astronomy/names';
@@ -32,7 +34,7 @@ import { Raycaster } from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import ScaleRuler from './ScaleRuler';
 import SettingsMenu from '@/components/SettingsMenu';
-import { ORBIT_COLORS, SUN_LIGHT_CONFIG, ORBIT_CURVE_POINTS } from '@/lib/config/visualConfig';
+import { ORBIT_COLORS, SUN_LIGHT_CONFIG, ORBIT_CURVE_POINTS, SATELLITE_CONFIG } from '@/lib/config/visualConfig';
 
 // ==================== 可调参数配置 ====================
 // ⚙️ 以下参数可在文件顶部调整，影响 3D 场景显示效果
@@ -302,14 +304,14 @@ export default function SolarSystemCanvas3D() {
         }
       }
 
-      // 创建行星和轨道
+      // 创建行星和轨道（含卫星）
       initialState.celestialBodies.forEach((body: any) => {
         if (body.isSun) return;
 
-        const elements = elementsMap[body.name.toLowerCase() as keyof typeof elementsMap];
-        if (!elements) return;
+        // 卫星（有 parent 字段）与行星采用统一的 Planet 类来渲染
+        const isSatellite = !!body.parent;
 
-        // 创建行星
+        // 创建天体（行星或卫星）
         const planet = new Planet({
           body,
           rotationSpeed: ROTATION_SPEEDS[body.name.toLowerCase()] || 0,
@@ -318,18 +320,35 @@ export default function SolarSystemCanvas3D() {
         const planetMesh = planet.getMesh();
         scene.add(planetMesh);
         planetsRef.current.set(body.name.toLowerCase(), planet);
-        
+
         // 创建标记圈（2D）
         planet.createMarkerCircle(CSS2DObject);
 
-        // 创建轨道（传入行星当前位置用于渐变计算）
-        const orbitColor = ORBIT_COLORS[body.name.toLowerCase()] || body.color;
-        const planetPosition = new THREE.Vector3(body.x, body.y, body.z);
-        const orbit = new OrbitCurve(elements, orbitColor, ORBIT_CURVE_POINTS, julianDay, planetPosition);
-        scene.add(orbit.getLine());
-        orbitsRef.current.set(body.name.toLowerCase(), orbit);
-        
-        // 创建文字标签（确保每个行星只创建一个标签）
+        // 创建轨道
+        if (isSatellite) {
+          // 查找卫星定义以获取轨道半径、颜色、倾角和升交点黄经
+          const parentKey = body.parent as string;
+          const defs = SATELLITE_DEFINITIONS[parentKey];
+          const def = defs ? defs.find((s) => s.name === body.name) : null;
+          const orbitRadius = def ? def.a : 0.001;
+          const orbitColor = def ? def.color : body.color;
+          const inclination = def ? def.i : 0;
+          const Omega = def ? def.Omega : 0;
+          const orbit = new SatelliteOrbit(orbitRadius, orbitColor, 128, inclination, Omega);
+          scene.add(orbit.getLine());
+          orbitsRef.current.set(body.name.toLowerCase(), orbit as unknown as OrbitCurve);
+        } else {
+          const elements = elementsMap[body.name.toLowerCase() as keyof typeof elementsMap];
+          if (!elements) return;
+
+          const orbitColor = ORBIT_COLORS[body.name.toLowerCase()] || body.color;
+          const planetPosition = new THREE.Vector3(body.x, body.y, body.z);
+          const orbit = new OrbitCurve(elements, orbitColor, ORBIT_CURVE_POINTS, julianDay, planetPosition);
+          scene.add(orbit.getLine());
+          orbitsRef.current.set(body.name.toLowerCase(), orbit);
+        }
+
+        // 创建文字标签（确保每个行星/卫星只创建一个标签）
         // 标签位置在标记圈的右上角
         if (!labelsRef.current.has(body.name.toLowerCase())) {
           const labelDiv = document.createElement('div');
@@ -401,6 +420,33 @@ export default function SolarSystemCanvas3D() {
           }
         });
         
+        // 播放时的相机跟踪逻辑：同时更新相机和目标点位置，保持相对偏移
+        // 这样在播放时，行星始终保持在屏幕中心，且视角不会被锁定
+        if (state.isPlaying && state.selectedPlanet) {
+          const selectedBody = currentBodies.find((b: any) => b.name === state.selectedPlanet);
+          if (selectedBody && cameraControllerRef.current) {
+            const controls = cameraControllerRef.current.getControls();
+            const targetPos = new THREE.Vector3(selectedBody.x, selectedBody.y, selectedBody.z);
+            
+            // 计算相机相对于当前目标的偏移向量（保持距离和方向）
+            const cameraOffset = new THREE.Vector3()
+              .subVectors(camera.position, controls.target);
+            
+            // 同时更新目标和相机位置，保持相对关系
+            controls.target.copy(targetPos);
+            camera.position.copy(targetPos).add(cameraOffset);
+            controls.update();
+          }
+        }
+        
+        // 播放时降低阻尼因子获得更敏锐的相机响应，非播放时恢复正常值
+        if (cameraControllerRef.current) {
+          const controls = cameraControllerRef.current.getControls();
+          // 播放时使用较低的阻尼（0.02）以获得敏捷的跟踪，保持缓动但响应更快
+          // 非播放时使用正常阻尼（0.04）以保留平滑的交互感
+          controls.dampingFactor = state.isPlaying ? 0.02 : 0.04;
+        }
+
         // 更新太阳位置
         const sunPlanet = planetsRef.current.get('sun');
         if (sunPlanet) {
@@ -472,6 +518,21 @@ export default function SolarSystemCanvas3D() {
           const key = body.name.toLowerCase();
           const planet = planetsRef.current.get(key);
           const label = labelsRef.current.get(key);
+          
+          // 跳过不可见的卫星（不在重叠检测中考虑它们）
+          if (body.isSatellite) {
+            const parentKey = body.parent as string;
+            const parentPlanet = planetsRef.current.get(parentKey.toLowerCase());
+            if (!parentPlanet) return;
+            const parentPos = new THREE.Vector3();
+            parentPlanet.getMesh().getWorldPosition(parentPos);
+            const cameraPosVec = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
+            const distanceToParent = cameraPosVec.distanceTo(parentPos);
+            // 卫星不可见时，跳过重叠检测
+            if (distanceToParent >= SATELLITE_CONFIG.visibilityThreshold) {
+              return;
+            }
+          }
           
           // 只要有 planet 就收集信息（即使没有 label）
           if (planet) {
@@ -606,6 +667,71 @@ export default function SolarSystemCanvas3D() {
             }
             // 确保标记圈的透明度被更新
             planet.updateMarkerOpacity();
+          }
+        });
+
+        // 5. 更新卫星轨道的中心（使卫星轨道跟随母行星位置）并控制卫星可见性
+        currentBodies.forEach((body: any) => {
+          if (!body.isSatellite) return;
+          
+          const satelliteKey = body.name.toLowerCase();
+          const orbit = orbitsRef.current.get(satelliteKey);
+          if (!orbit) return;
+          
+          const parentKey = body.parent as string;
+          const parentPlanet = planetsRef.current.get(parentKey.toLowerCase());
+          if (!parentPlanet) return;
+          
+          const parentPos = new THREE.Vector3();
+          parentPlanet.getMesh().getWorldPosition(parentPos);
+          const cameraPosVec = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
+          const distanceToParent = cameraPosVec.distanceTo(parentPos);
+          
+          // 计算卫星的可见性（基于相机到母行星的距离）
+          const isVisible = distanceToParent < SATELLITE_CONFIG.visibilityThreshold;
+          const fadeThreshold = SATELLITE_CONFIG.fadeOutDistance;
+          
+          // 计算淡出的透明度（从 fadeThreshold 到 visibilityThreshold）
+          let satelliteOpacity = 1.0;
+          if (distanceToParent > SATELLITE_CONFIG.visibilityThreshold) {
+            satelliteOpacity = 0;
+          } else if (distanceToParent > (SATELLITE_CONFIG.visibilityThreshold - (fadeThreshold - SATELLITE_CONFIG.visibilityThreshold))) {
+            // 在可见阈值附近渐隐
+            const fadeRange = fadeThreshold - SATELLITE_CONFIG.visibilityThreshold;
+            const fadeDistance = Math.max(0, distanceToParent - (SATELLITE_CONFIG.visibilityThreshold - fadeRange));
+            satelliteOpacity = 1 - (fadeDistance / fadeRange);
+          }
+          
+          // 更新卫星网格、轨道、标记圈和标签的可见性
+          const satelliteMesh = planetsRef.current.get(satelliteKey)?.getMesh();
+          if (satelliteMesh) {
+            satelliteMesh.visible = isVisible;
+          }
+          
+          // 更新卫星轨道可见性
+          orbit.getLine().visible = isVisible;
+          
+          // 更新卫星标记圈可见性
+          const satellite = planetsRef.current.get(satelliteKey);
+          if (satellite) {
+            satellite.setMarkerTargetOpacity(isVisible ? satelliteOpacity : 0);
+          }
+          
+          // 更新卫星标签可见性和交互
+          const satelliteLabel = labelsRef.current.get(satelliteKey);
+          if (satelliteLabel && satelliteLabel.element) {
+            satelliteLabel.element.style.opacity = isVisible ? satelliteOpacity.toString() : '0';
+            satelliteLabel.element.style.display = isVisible ? 'block' : 'none';
+            // 关键：不可见时禁用指针事件，防止 DOM 元素阻挡行星标签
+            satelliteLabel.element.style.pointerEvents = isVisible ? 'auto' : 'none';
+          }
+          
+          // 更新轨道中心位置
+          try {
+            // @ts-ignore
+            orbit.updatePlanetPosition(parentPos);
+          } catch (err) {
+            // 忽略错误
           }
         });
 

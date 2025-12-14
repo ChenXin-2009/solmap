@@ -43,6 +43,10 @@ export interface CelestialBody {
   radius: number;
   color: string;
   isSun?: boolean;
+  // 可选：父天体的 key（小写），用于标识卫星
+  parent?: string;
+  // 标识这是否为卫星
+  isSatellite?: boolean;
   elements?: OrbitalElements;
 }
 
@@ -193,6 +197,70 @@ export const ORBITAL_ELEMENTS: Record<string, OrbitalElements> = {
 };
 
 /**
+ * 卫星定义（含完整轨道参数）
+ * 
+ * 数据源：NASA JPL HORIZONS 和 IAU WGAS 报告
+ * 参数说明：
+ * - parent: 母天体 key（小写，如 'jupiter'）
+ * - name: 卫星名（英文）
+ * - a: 半长轴（km，最后除以 AU 转换）
+ * - periodDays: 公转周期（天）
+ * - i: 轨道倾角（度，相对于母行星的赤道平面）
+ * - Omega: 升交点黄经（度）
+ * - radius: 卫星渲染半径（km，最后除以 AU 转换）
+ * - color: 显示颜色
+ * - phase: 初始相位（0-1）
+ */
+export const SATELLITE_DEFINITIONS: Record<string, Array<{
+  name: string;
+  a: number;          // 半长轴（AU）
+  periodDays: number;
+  i: number;          // 轨道倾角（弧度）
+  Omega: number;      // 升交点黄经（弧度）
+  radius: number;     // 半径（AU）
+  color: string;
+  phase?: number;
+}>> = {
+  earth: [
+    // 地球唯一天然卫星
+    // 数据源：NASA JPL HORIZONS（2024）
+    // 月球轨道倾角相对于黄道面 ~5.14°
+    { name: 'Moon', a: 384400 / 149597870.7, periodDays: 27.322, i: 5.145 * Math.PI / 180, Omega: 0 * Math.PI / 180, radius: 1737.4 / 149597870.7, color: '#c0c0c0', phase: 0.0 },
+  ],
+  jupiter: [
+    // 木星的四颗伽利略卫星
+    // 数据源：NASA JPL HORIZONS（2024）
+    // 为每个卫星设置不同的升交点黄经，使它们的轨道处于不同平面
+    { name: 'Io', a: 421700 / 149597870.7, periodDays: 1.769, i: 0.04 * Math.PI / 180, Omega: 0 * Math.PI / 180, radius: 1821.6 / 149597870.7, color: '#f5d6a0', phase: 0.02 },
+    { name: 'Europa', a: 671034 / 149597870.7, periodDays: 3.551, i: 0.47 * Math.PI / 180, Omega: 90 * Math.PI / 180, radius: 1560.8 / 149597870.7, color: '#d9e8ff', phase: 0.25 },
+    { name: 'Ganymede', a: 1070412 / 149597870.7, periodDays: 7.154, i: 0.18 * Math.PI / 180, Omega: 180 * Math.PI / 180, radius: 2634.1 / 149597870.7, color: '#cfae8b', phase: 0.5 },
+    { name: 'Callisto', a: 1882700 / 149597870.7, periodDays: 16.689, i: 0.19 * Math.PI / 180, Omega: 270 * Math.PI / 180, radius: 2410.3 / 149597870.7, color: '#bba99b', phase: 0.75 },
+  ],
+  saturn: [
+    // 土星主要卫星
+    // 数据源：NASA JPL HORIZONS（2024）
+    // 为卫星设置不同的升交点黄经
+    { name: 'Titan', a: 1221870 / 149597870.7, periodDays: 15.945, i: 0.34 * Math.PI / 180, Omega: 45 * Math.PI / 180, radius: 2574.73 / 149597870.7, color: '#ffd9a6', phase: 0.2 },
+    { name: 'Enceladus', a: 238020 / 149597870.7, periodDays: 1.370, i: 0.01 * Math.PI / 180, Omega: 225 * Math.PI / 180, radius: 252.1 / 149597870.7, color: '#e6f7ff', phase: 0.6 },
+  ],
+  uranus: [
+    // 天王星卫星
+    // 天王星自转轴倾斜97.8°，卫星轨道倾角相对于天王星赤道平面
+    // 数据源：NASA JPL HORIZONS（2024）
+    // 为卫星设置不同的升交点黄经
+    { name: 'Miranda', a: 129900 / 149597870.7, periodDays: 1.413, i: 4.338 * Math.PI / 180, Omega: 30 * Math.PI / 180, radius: 235.8 / 149597870.7, color: '#f0e9ff', phase: 0.1 },
+    { name: 'Ariel', a: 191020 / 149597870.7, periodDays: 2.521, i: 0.260 * Math.PI / 180, Omega: 120 * Math.PI / 180, radius: 578.9 / 149597870.7, color: '#cfe7ff', phase: 0.35 },
+    { name: 'Umbriel', a: 266000 / 149597870.7, periodDays: 4.144, i: 0.360 * Math.PI / 180, Omega: 210 * Math.PI / 180, radius: 584.7 / 149597870.7, color: '#bfc4d6', phase: 0.6 },
+    { name: 'Titania', a: 436300 / 149597870.7, periodDays: 8.706, i: 0.100 * Math.PI / 180, Omega: 300 * Math.PI / 180, radius: 788.9 / 149597870.7, color: '#d6eaff', phase: 0.9 },
+  ],
+  neptune: [
+    // 海王星主要卫星
+    // 数据源：NASA JPL HORIZONS（2024）
+    { name: 'Triton', a: 354800 / 149597870.7, periodDays: 5.877, i: 156.87 * Math.PI / 180, Omega: 0 * Math.PI / 180, radius: 1353.4 / 149597870.7, color: '#bde0ff', phase: 0.4 },
+  ]
+};
+
+/**
  * 计算给定时刻的轨道元素
  * @param elements - 基准轨道元素
  * @param T - 从J2000.0起的儒略世纪数
@@ -283,49 +351,6 @@ export function calculatePosition(
 }
 
 /**
- * 月球位置计算（ELP2000简化模型）
- * @param earthPos - 地球位置
- * @param julianDay - 儒略日
- */
-export function calculateMoonPosition(
-  earthPos: { x: number; y: number; z: number },
-  julianDay: number
-): { x: number; y: number; z: number; r: number } {
-  // 从J2000.0起的天数
-  const T = (julianDay - 2451545.0) / 36525.0;
-  
-  // 月球平黄经（简化）
-  const L_moon = (218.3164477 + 481267.88123421 * T) * Math.PI / 180;
-  
-  // 月球到地心的距离（平均值，单位：km → AU）
-  const a_moon = 384400 / 149597870.7; // 约 0.00257 AU
-  
-  // 月球近地点平近点角
-  const M_moon = (134.9633964 + 477198.8675055 * T) * Math.PI / 180;
-  
-  // 简化的月球黄经（考虑近地点运动）
-  const lambda = L_moon + 6.2887 * Math.sin(M_moon) * Math.PI / 180;
-  
-  // 月球黄纬（简化为0，实际约±5°）
-  const beta = 5.128 * Math.sin((93.2721 + 483202.0175 * T) * Math.PI / 180) * Math.PI / 180;
-  
-  // 月地距离变化
-  const r_moon = a_moon * (1 - 0.0549 * Math.cos(M_moon));
-  
-  // 月球相对地球的位置
-  const dx = r_moon * Math.cos(beta) * Math.cos(lambda);
-  const dy = r_moon * Math.cos(beta) * Math.sin(lambda);
-  const dz = r_moon * Math.sin(beta);
-  
-  return {
-    x: earthPos.x + dx,
-    y: earthPos.y + dy,
-    z: earthPos.z + dz,
-    r: r_moon
-  };
-}
-
-/**
  * 获取所有天体位置
  */
 export function getCelestialBodies(julianDay: number): CelestialBody[] {
@@ -364,8 +389,58 @@ export function getCelestialBodies(julianDay: number): CelestialBody[] {
       earthPos = pos;
     }
   }
-  
-  // 月球已移除，不再显示
+
+  // 生成行星的卫星（简化轨道模型）
+  // 使用圆形轨道，轨道中心为母天体当前位置，轨道半径使用 SATELLITE_DEFINITIONS 中的 a
+  const planetPosMap: Record<string, { x: number; y: number; z: number }> = {};
+  for (const b of bodies) {
+    planetPosMap[b.name.toLowerCase()] = { x: b.x, y: b.y, z: b.z };
+  }
+
+  const daysSinceJ2000 = julianDay - 2451545.0;
+  for (const [parentKey, sats] of Object.entries(SATELLITE_DEFINITIONS)) {
+    const parentPos = planetPosMap[parentKey];
+    if (!parentPos) continue;
+
+    for (const sat of sats) {
+      // 计算平均角度（基于简化的固定周期）
+      const theta = (2 * Math.PI * (daysSinceJ2000 / sat.periodDays + (sat.phase || 0))) % (2 * Math.PI);
+
+      // 卫星轨道坐标（在标准轨道面内）
+      const r_orb = sat.a;  // 轨道半径
+      const x_orb = r_orb * Math.cos(theta);  // 轨道平面 X 坐标（升交点方向）
+      const y_orb = r_orb * Math.sin(theta);  // 轨道平面 Y 坐标
+      const z_orb = 0;                        // 轨道平面内 Z = 0（暂时在轨道平面内）
+
+      // ⚠️ 关键修复：正确的旋转顺序（欧拉角 Z-X-Z 约定）
+      // 第一步：绕 Z 轴旋转升交点黄经 (Ω)，使升交点指向正确的方向
+      const cos_Om = Math.cos(sat.Omega);
+      const sin_Om = Math.sin(sat.Omega);
+      const x_1 = x_orb * cos_Om - y_orb * sin_Om;
+      const y_1 = x_orb * sin_Om + y_orb * cos_Om;
+      const z_1 = z_orb;
+
+      // 第二步：绕 X 轴旋转倾角 (i)，使轨道平面倾斜
+      const cos_i = Math.cos(sat.i);
+      const sin_i = Math.sin(sat.i);
+      const ox = x_1;
+      const oy = y_1 * cos_i - z_1 * sin_i;
+      const oz = y_1 * sin_i + z_1 * cos_i;
+
+      bodies.push({
+        name: sat.name,
+        x: parentPos.x + ox,
+        y: parentPos.y + oy,
+        z: parentPos.z + oz,
+        r: 0,
+        radius: sat.radius,
+        color: sat.color,
+        // 便于渲染逻辑识别这是个卫星
+        parent: parentKey,
+        isSatellite: true,
+      } as unknown as CelestialBody);
+    }
+  }
   
   return bodies;
 }

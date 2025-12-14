@@ -6,6 +6,7 @@ import "./globals.css";
 import { Analytics } from "@vercel/analytics/next";          // ← 新增
 import { SpeedInsights } from "@vercel/speed-insights/next"; // ← 新增
 import LanguageDetector from "@/components/LanguageDetector";
+import Header from "@/components/Header";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -64,6 +65,7 @@ export default async function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <Header />
         <LanguageDetector initialLang={lang} />
         {children}
 

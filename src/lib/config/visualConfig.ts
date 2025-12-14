@@ -185,6 +185,9 @@ export const TEXTURE_LOADING_CONFIG = {
  * 卫星相关全局配置
  * - enabled: 是否显示并模拟卫星
  * - defaultScale: 卫星相对于真实半径的渲染缩放因子（可用于放大小卫星以便可视化）
+ * - visibilityThreshold: 相机到母行星距离小于此值时才显示卫星（AU 单位）
+ *   防止卫星文字与行星文字重叠遮挡。建议范围：0.1-0.5
+ * - fadeOutDistance: 卫星开始渐隐的距离（AU）。当相机距离大于此值时卫星逐步淡出
  */
 export const SATELLITE_CONFIG = {
   enabled: true,
@@ -192,12 +195,73 @@ export const SATELLITE_CONFIG = {
   // 当选中父行星并聚焦时，摄像机与父行星的距离小于 (parentRadius * showOnFocusMultiplier) 才显示卫星
   // 值越大需要更靠近父行星才会显示卫星
   showOnFocusMultiplier: 15,
+  // 卫星可见性阈值（AU）：相机到母行星距离小于此值时卫星才显示
+  visibilityThreshold: 0.15,
+  // 卫星开始淡出的距离（AU）
+  fadeOutDistance: 0.25,
 };
 
 /**
  * ==================== 相机控制器配置（CameraController） ====================
  * 防穿透与无限放大相关参数
  */
+
+/**
+ * Header（页头）配置
+ * 左侧LOGO和右侧网站信息的显示参数
+ */
+export const HEADER_CONFIG = {
+  // 是否启用Header
+  enabled: true,
+  
+  // LOGO图片路径
+  logoPath: '/CX.svg',
+  
+  // LOGO大小（像素）
+  logoSize: 48,
+  
+  // 左边距（像素）
+  paddingLeft: 24,
+  
+  // Header高度（像素）
+  height: 80,
+  
+  // Header背景颜色（CSS颜色值）
+  backgroundColor: 'rgba(0, 0, 0, 0.8)',
+  
+  // Header边框颜色
+  borderColor: 'rgba(255, 255, 255, 0.1)',
+  
+  // 网站标题文本
+  titleText: 'CXIN',
+  
+  // 网站副标题文本
+  subtitleText: 'solmap.cxin.tech',
+  
+  // 标题字体大小（像素）
+  titleFontSize: 24,
+  
+  // 副标题字体大小（像素）
+  subtitleFontSize: 14,
+  
+  // 标题字体粗细
+  titleFontWeight: 600,
+  
+  // 副标题字体粗细
+  subtitleFontWeight: 400,
+  
+  // 文字颜色
+  textColor: '#ffffff',
+  
+  // 副标题文字颜色（可与标题不同）
+  subtitleColor: '#b0b0b0',
+  
+  // 标题和副标题之间的间距（像素）
+  textSpacing: 4,
+  
+  // 文字区域与LOGO的间距（像素）
+  contentGap: 20,
+};
 
 /**
  * 相机防穿透约束配置
@@ -267,11 +331,11 @@ export const CAMERA_FOCUS_CONFIG = {
   
   // 聚焦后初始相机距离相对于行星半径的倍数
   // 值越大相机离行星越远。建议范围：3-8
-  focusDistanceMultiplier: 5,
+  focusDistanceMultiplier: 8,
   
   // 防穿透时的最小距离倍数（相对于行星半径）
   // 当相机缩放时不会穿过此距离。建议范围：0.1-0.5
-  minDistanceMultiplier: 0.1,
+  minDistanceMultiplier: 1.2,
 };
 
 /**

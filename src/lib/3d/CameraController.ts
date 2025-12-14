@@ -524,9 +524,9 @@ export class CameraController {
     if (planetRadius !== undefined && planetRadius > 0) {
       this.focusedPlanetRadius = planetRadius;
       this.focusedPlanetPosition = targetPosition.clone();
-      // 最小距离 = 行星半径 * 倍数（0.1 允许接近行星表面）
-      const minSafeDistance = planetRadius * CAMERA_FOCUS_CONFIG.minDistanceMultiplier;
-      // 不再限制目标距离，允许用户无限放大
+      // 最小距离 = 行星半径 * 倍数
+      // 关键修复：设置更大的倍数（1.5）确保聚焦后不会进入行星内部
+      const minSafeDistance = planetRadius * Math.max(1.5, CAMERA_FOCUS_CONFIG.minDistanceMultiplier);
       // 更新 OrbitControls 的最小距离：确保至少为安全最小距离，防止用户通过缩放穿过表面
       this.controls.minDistance = Math.max(minSafeDistance, CAMERA_ZOOM_CONFIG.minDistance);
     } else {
@@ -557,8 +557,11 @@ export class CameraController {
       currentDirection.set(0, 0.5, 1).normalize();
     }
     
-    // 使用目标距离（不再限制最小距离，支持无限放大）
-    const safeDistance = targetDistance;
+    // 确保目标距离至少为最小安全距离，防止聚焦后立即进入行星
+    const minSafeDistance = this.focusedPlanetRadius > 0 
+      ? this.focusedPlanetRadius * Math.max(1.5, CAMERA_FOCUS_CONFIG.minDistanceMultiplier)
+      : targetDistance;
+    const safeDistance = Math.max(targetDistance, minSafeDistance);
     
     const newCameraPosition = new THREE.Vector3()
       .copy(targetPosition)
@@ -729,6 +732,28 @@ export class CameraController {
       this.targetControlsTarget = null;
       this.resetMinDistance();
     }
+
+    // 如果焦点在行星上（focusedPlanetRadius > 0），使用 FOV 缩放而非距离缩放
+    // 这样可以防止相机穿透行星内部，而是通过减小视野来实现放大
+    if (this.focusedPlanetRadius > 0) {
+      // 使用 FOV 缩放模式
+      const baseFactor = 0.1; // FOV 缩放速度
+      const scrollSpeed = Math.min(Math.abs(delta), 3);
+      
+      // delta > 0 表示放大（减小 FOV），delta < 0 表示缩小（增大 FOV）
+      const fovDelta = delta > 0 
+        ? -(baseFactor * scrollSpeed) 
+        : (baseFactor * scrollSpeed);
+      
+      // 计算新的 FOV
+      const minFov = 5;   // 最小 FOV（最大放大）
+      const maxFov = 120; // 最大 FOV（最小放大）
+      this.targetFov = Math.max(minFov, Math.min(maxFov, this.currentFov + fovDelta));
+      this.isFovTransitioning = true;
+      
+      // 保持距离不变，只改变 FOV
+      return;
+    }
     
     // ⚠️ 关键修复：缩放时不要停止跟踪，而是让跟踪使用缩放后的距离
     // 这样用户可以在跟踪行星的同时缩放
@@ -756,11 +781,20 @@ export class CameraController {
     // 计算新的目标距离
     const newTargetDistance = currentDistance * zoomFactor;
     
+    // 关键修复：如果有聚焦的行星，应用防穿透约束，防止缩放进入行星内部
+    let constrainedDistance = newTargetDistance;
+    if (this.focusedPlanetRadius > 0 && this.focusedPlanetPosition) {
+      // 最小安全距离 = 行星半径 * 倍数（确保充分的防穿透间距）
+      // 使用较大的倍数（1.5）而不是 safetyDistanceMultiplier（1.05）以获得更安全的间距
+      const minSafeDistance = this.focusedPlanetRadius * 1.5;
+      constrainedDistance = Math.max(newTargetDistance, minSafeDistance);
+    }
+    
     // 更新目标距离（支持无限放大到极小距离）
     // 允许距离降到极小值（如 0.00001 AU）以支持像地图软件那样的无限放大
     this.targetDistance = Math.max(
       CAMERA_ZOOM_CONFIG.minDistance,
-      Math.min(this.controls.maxDistance, newTargetDistance)
+      Math.min(this.controls.maxDistance, constrainedDistance)
     );
     
     // 同步平滑距离，确保缩放从当前位置开始
