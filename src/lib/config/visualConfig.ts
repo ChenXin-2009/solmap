@@ -113,9 +113,9 @@ export const SUN_RAINBOW_LAYERS = [
  * - maxOpacity/minOpacity: 渐变两端的透明度范围
  */
 export const ORBIT_GRADIENT_CONFIG = {
-  enabled: true,
+  enabled: false, // 禁用轨道渐变，避免黑色段问题
   maxOpacity: 1.0,
-  minOpacity: 0.1,
+  minOpacity: 0.8, // 提高最小透明度，减少黑色段
 };
 
 /**
@@ -218,13 +218,36 @@ export const HEADER_CONFIG = {
   logoPath: '/CX.svg',
   
   // LOGO大小（像素）
-  logoSize: 48,
+  logoSize: 55,
   
   // 左边距（像素）
-  paddingLeft: 24,
+  paddingLeft: 10,
   
   // Header高度（像素）
   height: 80,
+
+  // 是否使用浮动 Logo/Header（无顶栏布局）
+  // true = 使用小型浮动 logo（默认）; false = 使用传统顶栏
+  floatingMode: true,
+
+  // 浮动 Header 位置（像素）
+  floatingPosition: {
+    top: 12,
+    left: 12,
+  },
+
+  // 浮动 Header 样式（可选）
+  floatingStyle: {
+    transitionDuration: 180,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    hoverBackgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 8,
+    padding: 8,
+    boxShadow: '0 6px 18px rgba(0,0,0,0.6)',
+    backdropFilter: 'blur(6px)',
+  },
   
   // Header背景颜色（CSS颜色值）
   backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -270,12 +293,12 @@ export const HEADER_CONFIG = {
 export const CAMERA_PENETRATION_CONFIG = {
   // 防穿透安全距离倍数：相对于行星半径的倍数。
   // 当相机距离 < 行星半径 * 此倍数时，触发防穿透约束
-  // 值越大，约束触发越早；通常设为 1.0-1.5
-  safetyDistanceMultiplier: 1.05,
+  // 值越大，约束触发越早；设为 1.2 确保相机始终在表面外
+  safetyDistanceMultiplier: 1.6,
   
   // 防穿透约束的平滑过渡速度（0-1），用于平滑调整焦点位置
   // 值越大约束响应越快，值越小约束更平缓。建议范围：0.05-0.3
-  constraintSmoothness: 0.15,
+  constraintSmoothness: 0.25,
   
   // 约束应用时是否同时调整相机距离以避免跳跃
   // true：焦点和相机都调整；false：仅调整焦点
@@ -287,7 +310,7 @@ export const CAMERA_PENETRATION_CONFIG = {
   
   // 启用防穿透约束的调试模式
   // true：会在控制台打印约束触发和参数信息
-  debugMode: true,
+  debugMode: false,
 };
 
 /**
@@ -436,4 +459,24 @@ export const PLANET_LOD_CONFIG = {
   // 分段数平滑过渡速度（0-1，值越大变化越快）
   // 越小越平滑但反应越慢。建议范围：0.1-0.3
   smoothness: 0.15,
+};
+
+/**
+ * 行星经纬线网格（Lat/Lon grid）配置
+ * - enabled: 是否显示经纬线
+ * - meridians: 经线数量
+ * - parallels: 纬线数量
+ * - color: 线颜色（CSS 颜色或十六进制）
+ * - opacity: 线不透明度
+ * - segments: 每条线的分段数
+ * - outwardOffset: 将线稍微向外偏移（相对于星球半径的比例）以减少 Z-fighting
+ */
+export const PLANET_GRID_CONFIG = {
+  enabled: true,
+  meridians: 12,
+  parallels: 6,
+  color: '#ffffff',
+  opacity: 0.2, // 增加不透明度以提高可见性
+  segments: 96,
+  outwardOffset: 0.002, // 使用相对于半径的比例（0.2%），而不是绝对值
 };

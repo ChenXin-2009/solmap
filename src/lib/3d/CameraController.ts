@@ -1,41 +1,35 @@
 /**
  * CameraController.ts - 3D 相机控制器
- * 
+ *
  * 功能：
  * - 管理 Three.js PerspectiveCamera 和 OrbitControls
  * - 实现平滑缩放、聚焦、跟踪等功能
- * - 支持鼠标滚轮和触摸手势缩放
- * - 防穿透约束：防止相机穿过行星表面（如地图软件放大地球）
- * 
- * 使用模式：
- * - 自由观察模式：用户可以自由平移、旋转、缩放
- * - 聚焦模式：点击行星后平滑移动到目标位置
- * - 跟踪模式：聚焦后持续跟踪行星运动
- * 
- * ✨ 防穿透约束说明：
- * 当用户点击行星并开始放大时，相机会逐渐接近行星。如果继续放大（缩放距离小于行星半径），
- * 系统会自动将焦点（OrbitControls.target）沿着 "行星中心→相机" 的方向移动到行星表面。
- * 这样用户可以无限放大直到看清行星表面细节，就像使用地图软件放大地球一样，
- * 但相机永远不会穿透行星内部。
- * 
- * 核心算法（applyPenetrationConstraint）：
- * 1. 每帧检查相机是否穿过焦点行星表面
- * 2. 如果相机距离 < 行星半径，计算新焦点位置：
- *    新焦点 = 行星中心 + (相机方向 * 行星半径)
- * 3. 更新 OrbitControls.target 到新焦点位置
- * 4. 用户可继续旋转和缩放，约束会动态调整焦点位置
  */
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  CAMERA_PENETRATION_CONFIG,
-  CAMERA_ZOOM_CONFIG,
-  CAMERA_FOCUS_CONFIG,
-  CAMERA_TRACKING_CONFIG,
   CAMERA_VIEW_CONFIG,
   CAMERA_OPERATION_CONFIG,
+  CAMERA_ZOOM_CONFIG,
+  CAMERA_FOCUS_CONFIG,
+  CAMERA_TRACKING_CONFIG
 } from '@/lib/config/visualConfig';
+
+// 防穿透约束配置（用于确保相机不会穿过行星表面）
+import { CAMERA_PENETRATION_CONFIG } from '@/lib/config/visualConfig';
+
+// Enhanced focus management
+import { FocusManager, type CelestialObject, type FocusOptions } from './FocusManager';
+
+// 兼容旧代码中对单一 CAMERA_CONFIG 的使用（将分散的配置合并为一个便捷对象）
+const CAMERA_CONFIG = {
+  ...CAMERA_VIEW_CONFIG,
+  ...CAMERA_OPERATION_CONFIG,
+  ...CAMERA_ZOOM_CONFIG,
+  ...CAMERA_FOCUS_CONFIG,
+  ...CAMERA_TRACKING_CONFIG
+};
 
 export type CameraMode = 'free' | 'locked' | 'follow';
 
@@ -45,6 +39,9 @@ export class CameraController {
   private mode: CameraMode = 'free';
   private targetBody: THREE.Object3D | null = null;
   private followSpeed: number = 0.1; // 跟随缓动速度
+  
+  // Enhanced focus management
+  private focusManager: FocusManager;
   
   // 平滑缩放相关
   private smoothDistance: number = 0; // 当前平滑的距离
@@ -63,25 +60,23 @@ export class CameraController {
   private targetCameraPosition: THREE.Vector3 | null = null;
   private targetControlsTarget: THREE.Vector3 | null = null;
   private isFocusing: boolean = false;
+  // 当前聚焦目标的真实半径（AU），用于防穿透约束
+  private currentTargetRadius: number | null = null;
   
   // 跟踪相关
   private isTracking: boolean = false; // 是否正在跟踪目标
   private trackingTargetGetter: (() => THREE.Vector3) | null = null; // 获取跟踪目标位置的函数
   private trackingDistance: number = 5; // 跟踪时的相机距离
-  
-  // 防穿透相关：防止相机穿过行星表面（如地图软件）
-  private focusedPlanetRadius: number = 0; // 当前焦点的行星半径（0表示无约束）
-  private focusedPlanetPosition: THREE.Vector3 | null = null; // 当前焦点的行星位置
-  
-  // 动态近平面调整相关：防止相机靠近时因近平面裁剪而看不到行星
-  private originalNearPlane: number = 0.01; // 初始近平面值（保存以备恢复）
 
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLElement) {
     this.camera = camera;
     this.domElement = domElement;
     
+    // Initialize enhanced focus manager
+    this.focusManager = new FocusManager();
+    
     // 应用 FOV 配置
-    this.camera.fov = CAMERA_VIEW_CONFIG.fov;
+    this.camera.fov = CAMERA_CONFIG.fov;
     this.camera.updateProjectionMatrix();
     
     this.controls = new OrbitControls(camera, domElement);
@@ -90,7 +85,7 @@ export class CameraController {
     this.controls.enableDamping = true; // 启用阻尼（惯性效果）
     // 阻尼系数：值越小，缓动越明显（每次只衰减一小部分速度，所以会持续更久）
     // 0.05 表示每帧保留 95% 的速度，衰减 5%，会产生明显的惯性效果
-    this.controls.dampingFactor = CAMERA_OPERATION_CONFIG.dampingFactor;
+    this.controls.dampingFactor = CAMERA_CONFIG.dampingFactor;
     
     // 确保每帧都更新阻尼（即使没有输入）
     this.controls.enableRotate = true;
@@ -101,18 +96,19 @@ export class CameraController {
     this.targetDistance = this.smoothDistance;
     this.lastDistance = this.smoothDistance;
     
-    // 距离限制
-    this.controls.minDistance = CAMERA_ZOOM_CONFIG.minDistance;
-    this.controls.maxDistance = CAMERA_ZOOM_CONFIG.maxDistance;
+    // 距离限制（移除最小距离限制，允许更接近目标）
+    // 将 minDistance 设为 0，避免在聚焦/滚轮时被瞬间限制回较远距离
+    this.controls.minDistance = 0;
+    this.controls.maxDistance = CAMERA_CONFIG.maxDistance;
     
     // 启用各种操作
     this.controls.enablePan = true; // 启用平移
     this.controls.enableRotate = true; // 启用旋转
     
     // 缩放平滑度配置
-    this.controls.zoomSpeed = CAMERA_ZOOM_CONFIG.zoomSpeed;
-    this.controls.panSpeed = CAMERA_OPERATION_CONFIG.panSpeed;
-    this.controls.rotateSpeed = CAMERA_OPERATION_CONFIG.rotateSpeed;
+    this.controls.zoomSpeed = CAMERA_CONFIG.zoomSpeed;
+    this.controls.panSpeed = CAMERA_CONFIG.panSpeed;
+    this.controls.rotateSpeed = CAMERA_CONFIG.rotateSpeed;
     
     // 禁用 OrbitControls 的自动缩放，我们将手动实现平滑缩放
     this.controls.enableZoom = false;
@@ -169,20 +165,20 @@ export class CameraController {
     this.isPolarAngleTransitioning = false;
     this.targetPolarAngle = 0;
     this.currentPolarAngle = 0;
-    this.polarAngleTransitionSpeed = CAMERA_OPERATION_CONFIG.polarAngleTransitionSpeed;
+    this.polarAngleTransitionSpeed = 0.08; // 角度过渡速度（0-1，越大越快）
   }
   
   // 相机角度平滑过渡相关
   private isPolarAngleTransitioning: boolean = false;
   private targetPolarAngle: number = 0;
   private currentPolarAngle: number = 0;
-  private polarAngleTransitionSpeed: number = CAMERA_OPERATION_CONFIG.polarAngleTransitionSpeed;
+  private polarAngleTransitionSpeed: number = 0.08; // 角度过渡速度（0-1，越大越快）
   
   // 左右角度（azimuthalAngle）平滑过渡相关
   private isAzimuthalAngleTransitioning: boolean = false;
   private targetAzimuthalAngle: number = 0;
   private currentAzimuthalAngle: number = 0;
-  private azimuthalAngleTransitionSpeed: number = CAMERA_OPERATION_CONFIG.azimuthalAngleTransitionSpeed;
+  private azimuthalAngleTransitionSpeed: number = 0.08; // 角度过渡速度（0-1，越大越快）
 
   /**
    * 设置相机垂直角度（polarAngle）
@@ -194,7 +190,7 @@ export class CameraController {
    * - polarAngle = 90° → 在地平线上（水平视角）
    * - polarAngle > 90° → 仰视
    */
-  setPolarAngle(angle: number, smooth: boolean = false): void {
+  setPolarAngle(angle: number, smooth = false) {
     // 将角度转换为弧度
     // 允许任意角度值（包括负数），但最终会转换为 0 到 Math.PI 的范围
     // 负数角度会被转换为对应的正角度（例如 -45° = 135°）
@@ -262,7 +258,7 @@ export class CameraController {
    * @param angle 角度（度），0度 = 正前方，90度 = 右侧，-90度 = 左侧
    * @param smooth 是否平滑过渡（默认 false，立即切换）
    */
-  setAzimuthalAngle(angle: number, smooth: boolean = false): void {
+  setAzimuthalAngle(angle: number, smooth = false) {
     // 将角度转换为弧度
     // 允许任意角度值（包括负数），转换为 -Math.PI 到 Math.PI 的范围
     let normalizedAngle = angle;
@@ -363,7 +359,7 @@ export class CameraController {
   }
 
   // 设置滚轮缩放处理
-  private setupWheelZoom(domElement: HTMLElement): void {
+  private setupWheelZoom(domElement: HTMLElement) {
     // 如果已经绑定过，先移除旧的监听器
     if (this.wheelHandler) {
       domElement.removeEventListener('wheel', this.wheelHandler);
@@ -417,7 +413,7 @@ export class CameraController {
   }
 
   // 设置触摸缩放处理
-  private setupTouchZoom(domElement: HTMLElement): void {
+  private setupTouchZoom(domElement: HTMLElement) {
     // 如果已经绑定过，先移除旧的监听器
     if (this.touchStartHandler) {
       domElement.removeEventListener('touchstart', this.touchStartHandler);
@@ -463,8 +459,9 @@ export class CameraController {
         const scale = currentDistance / initialDistance;
         // 手指张开（scale > 1）应该放大（减小距离），手指合拢（scale < 1）应该缩小（增大距离）
         // 所以应该是 initialSmoothDistance / scale（与鼠标滚轮逻辑一致）
+        // 不再受限于 controls.minDistance，允许更接近目标
         this.targetDistance = Math.max(
-          this.controls.minDistance,
+          0,
           Math.min(this.controls.maxDistance, initialSmoothDistance / scale)
         );
         this.isZooming = true;
@@ -480,7 +477,7 @@ export class CameraController {
     domElement.addEventListener('touchend', this.touchEndHandler);
   }
 
-  setMode(mode: CameraMode): void {
+  setMode(mode: CameraMode) {
     this.mode = mode;
     
     switch (mode) {
@@ -498,7 +495,7 @@ export class CameraController {
     }
   }
 
-  setTarget(body: THREE.Object3D | null): void {
+  setTarget(body: THREE.Object3D) {
     this.targetBody = body;
     if (body) {
       this.controls.target.copy(body.position);
@@ -507,36 +504,39 @@ export class CameraController {
   }
   
   /**
-   * 平滑移动到目标位置（用于点击聚焦）
+   * Enhanced focus on target with intelligent distance calculation
    * @param targetPosition 目标位置（初始位置）
-   * @param targetDistance 目标距离
+   * @param celestialObject Target celestial object with properties
    * @param trackingTargetGetter 可选的跟踪目标位置获取函数，如果提供则持续跟踪目标
-   * @param planetRadius 可选的行星半径，用于防止相机穿过行星表面
+   * @param options Optional focus parameters
    */
-  focusOnTarget(targetPosition: THREE.Vector3, targetDistance: number = 5, trackingTargetGetter?: () => THREE.Vector3, planetRadius?: number): void {
-    // 停止之前的聚焦动画（如果正在运行）
+  focusOnTarget(
+    targetPosition: THREE.Vector3, 
+    celestialObject?: CelestialObject, 
+    trackingTargetGetter?: () => THREE.Vector3,
+    options?: FocusOptions
+  ): void {
+    // Stop previous focus animation
     this.isFocusing = false;
     
-    // 保存初始近平面值（用于后续动态调整）
-    this.originalNearPlane = this.camera.near;
+    // Calculate optimal focus distance using enhanced system
+    let targetDistance = 5; // Default fallback
     
-    // 保存焦点行星信息，用于防穿透约束检查（确保相机始终在行星表面之外）
-    if (planetRadius !== undefined && planetRadius > 0) {
-      this.focusedPlanetRadius = planetRadius;
-      this.focusedPlanetPosition = targetPosition.clone();
-      // 最小距离 = 行星半径 * 倍数
-      // 关键修复：设置更大的倍数（1.5）确保聚焦后不会进入行星内部
-      const minSafeDistance = planetRadius * Math.max(1.5, CAMERA_FOCUS_CONFIG.minDistanceMultiplier);
-      // 更新 OrbitControls 的最小距离：确保至少为安全最小距离，防止用户通过缩放穿过表面
-      this.controls.minDistance = Math.max(minSafeDistance, CAMERA_ZOOM_CONFIG.minDistance);
+    if (celestialObject) {
+      targetDistance = this.focusManager.calculateFocusDistance(celestialObject, options);
+      
+      // Start focus transition tracking
+      this.focusManager.startFocusTransition(celestialObject, options);
+      
+      // Store target radius for penetration prevention
+      this.currentTargetRadius = celestialObject.radius;
     } else {
-      // 如果没有提供行星半径，使用默认最小距离
-      this.controls.minDistance = CAMERA_ZOOM_CONFIG.minDistance;
-      this.focusedPlanetRadius = 0;
-      this.focusedPlanetPosition = null;
+      // Legacy support - use provided distance or default
+      targetDistance = options?.distance || 5;
+      this.currentTargetRadius = null;
     }
     
-    // 设置跟踪模式
+    // Set tracking mode
     if (trackingTargetGetter) {
       this.isTracking = true;
       this.trackingTargetGetter = trackingTargetGetter;
@@ -545,214 +545,209 @@ export class CameraController {
       this.isTracking = false;
       this.trackingTargetGetter = null;
     }
-    
-    // 计算相机应该移动到的位置
-    // 使用从目标指向相机的方向，确保相机在目标外部
+
+    // Calculate camera direction (from target to camera)
     const currentDirection = new THREE.Vector3()
       .subVectors(this.camera.position, this.controls.target)
       .normalize();
     
-    // 如果方向无效（例如相机和目标在同一位置），使用默认方向（从上方观察）
+    // Use default direction if invalid
     if (currentDirection.length() < 0.001) {
       currentDirection.set(0, 0.5, 1).normalize();
     }
     
-    // 确保目标距离至少为最小安全距离，防止聚焦后立即进入行星
-    const minSafeDistance = this.focusedPlanetRadius > 0 
-      ? this.focusedPlanetRadius * Math.max(1.5, CAMERA_FOCUS_CONFIG.minDistanceMultiplier)
-      : targetDistance;
-    const safeDistance = Math.max(targetDistance, minSafeDistance);
-    
-    const newCameraPosition = new THREE.Vector3()
+    // Calculate safe camera position
+    let newCameraPosition = new THREE.Vector3()
       .copy(targetPosition)
-      .add(currentDirection.multiplyScalar(safeDistance));
+      .add(currentDirection.multiplyScalar(targetDistance));
     
-    // 同步平滑距离，确保缩放从正确的位置开始
-    this.smoothDistance = safeDistance;
-    this.targetDistance = safeDistance;
+    // Apply penetration constraints if object is provided
+    if (celestialObject) {
+      newCameraPosition = this.focusManager.applyPenetrationConstraints(
+        newCameraPosition, 
+        targetPosition, 
+        celestialObject.radius
+      );
+      
+      // Recalculate actual distance after constraint application
+      targetDistance = newCameraPosition.distanceTo(targetPosition);
+    }
     
-    // 平滑移动相机和目标（在update中处理）
+    // Sync smooth distance for zoom continuity
+    this.smoothDistance = targetDistance;
+    this.targetDistance = targetDistance;
+    
+    // Set transition targets
     this.targetCameraPosition = newCameraPosition;
     this.targetControlsTarget = targetPosition.clone();
     this.isFocusing = true;
+  }
+
+  /**
+   * Legacy focus method for backward compatibility
+   */
+  focusOnTargetLegacy(targetPosition: THREE.Vector3, targetDistance = 5, trackingTargetGetter?: () => THREE.Vector3, planetRadius?: number): void {
+    const celestialObject: CelestialObject | undefined = planetRadius ? {
+      name: 'unknown',
+      radius: planetRadius
+    } : undefined;
+    
+    this.focusOnTarget(targetPosition, celestialObject, trackingTargetGetter, { distance: targetDistance });
   }
   
   /**
    * 重置最小距离到默认值（用于取消聚焦时）
    */
-  resetMinDistance(): void {
-    this.controls.minDistance = CAMERA_ZOOM_CONFIG.minDistance;
-    this.focusedPlanetRadius = 0;
-    this.focusedPlanetPosition = null;
+  resetMinDistance() {
+    // 将 minDistance 重置为 0（不再限制最小距离）
+    this.controls.minDistance = 0;
   }
 
   /**
-   * 应用防穿透约束：确保相机不会穿过焦点行星的表面
-   * 原理：当相机穿过行星表面时，同时调整焦点和相机位置
-   * 效果：类似地图软件，可以无限放大直到看清行星表面
+   * Enhanced penetration prevention system with real-time detection
+   * @param deltaTime 时间步长（秒）
    */
-  private applyPenetrationConstraint(): void {
-    // 如果没有焦点行星信息或行星半径为 0，则跳过约束检查
-    if (this.focusedPlanetRadius <= 0 || !this.focusedPlanetPosition) {
-      return;
+  applyPenetrationConstraint(deltaTime: number) {
+    // 仅在已知目标半径时启用防穿透逻辑
+    if (!this.currentTargetRadius) return;
+
+    // 确定参考中心（优先使用跟踪获取器，其次是设置的 targetBody，再次使用 controls.target）
+    let center: THREE.Vector3 | null = null;
+    if (this.trackingTargetGetter) {
+      center = this.trackingTargetGetter();
+    } else if (this.targetBody) {
+      center = this.targetBody.position;
+    } else if (this.targetControlsTarget) {
+      center = this.targetControlsTarget.clone();
+    } else {
+      center = this.controls.target.clone();
     }
 
-    // 计算相机到行星中心的距离
-    const cameraToCenter = new THREE.Vector3()
-      .subVectors(this.camera.position, this.focusedPlanetPosition);
-    const cameraDistance = cameraToCenter.length();
+    if (!center) return;
+
+    const camPos = this.camera.position.clone();
+    const dir = new THREE.Vector3().subVectors(camPos, center);
+    let distToCenter = dir.length();
+    if (!isFinite(distToCenter) || distToCenter <= 0) return;
+
+    const minAllowedFromCenter = this.currentTargetRadius * CAMERA_PENETRATION_CONFIG.safetyDistanceMultiplier;
+
+    // Enhanced real-time penetration detection
+    const penetrationDepth = Math.max(0, minAllowedFromCenter - distToCenter);
+    const isPenetrating = penetrationDepth > 0;
     
-    // 计算安全距离（行星半径乘以安全倍数）
-    const safeDistance = this.focusedPlanetRadius * CAMERA_PENETRATION_CONFIG.safetyDistanceMultiplier;
+    // 如果距离已经安全，则无需处理
+    if (!isPenetrating) return;
 
-    // 如果相机距离大于安全距离，无需约束
-    if (cameraDistance > safeDistance) {
-      return;
-    }
+    // Calculate penetration severity for adaptive response
+    const penetrationRatio = penetrationDepth / minAllowedFromCenter;
+    const isDeepPenetration = penetrationRatio > 0.5;
 
-    // 调试输出
-    if (CAMERA_PENETRATION_CONFIG.debugMode) {
-      console.log(`[PenetrationConstraint] Camera distance: ${cameraDistance.toFixed(4)}, Safe distance: ${safeDistance.toFixed(4)}`);
-    }
-
-    // 相机穿过了行星表面，需要约束
-    // 1. 计算相机指向行星中心的归一化方向
-    const directionAwayFromCenter = cameraToCenter.length() > 0.0001 
-      ? cameraToCenter.normalize() 
-      : new THREE.Vector3(0, 0.5, 1).normalize();
-
-    // 2. 计算新的焦点位置（在行星表面上）和目标安全相机位置
-    const newFocusPosition = new THREE.Vector3()
-      .copy(this.focusedPlanetPosition)
-      .add(directionAwayFromCenter.clone().multiplyScalar(this.focusedPlanetRadius));
-
-    const desiredCameraPosition = new THREE.Vector3()
-      .copy(newFocusPosition)
-      .add(directionAwayFromCenter.clone().multiplyScalar(safeDistance));
-
-    const smoothness = CAMERA_PENETRATION_CONFIG.constraintSmoothness;
-
-    // 3. 根据配置决定是立即修正（强制 snap）还是平滑 lerp
-    if (CAMERA_PENETRATION_CONFIG.forceSnap) {
-      // 立即修正：直接设置焦点和相机位置，防止在快速滚轮下继续穿透
-      this.controls.target.copy(newFocusPosition);
-      if (CAMERA_PENETRATION_CONFIG.adjustCameraDistance) {
-        this.camera.position.copy(desiredCameraPosition);
-        // 将 OrbitControls 的最小距离设置为安全距离，防止随后的缩放动作靠得更近
-        this.controls.minDistance = safeDistance;
-        // 同步缩放状态，防止 zoom 逻辑在下一帧将相机再拉入内部
-        this.smoothDistance = safeDistance;
-        this.targetDistance = safeDistance;
+    // 计算安全的相机位置（保持当前方向，但调整距离）
+    const dirNorm = dir.length() > 1e-6 ? dir.normalize() : new THREE.Vector3(0, 1, 0);
+    
+    // ⚠️ 关键修复：只调整相机位置，不修改 controls.target
+    // 这样用户仍然可以自由旋转视角，只是不能穿透星球
+    if (CAMERA_PENETRATION_CONFIG.forceSnap || isDeepPenetration) {
+      // 立即修正：直接设置相机位置到安全距离
+      const safeDistance = Math.max(minAllowedFromCenter, this.smoothDistance || minAllowedFromCenter);
+      const safeCamPos = center.clone().add(dirNorm.clone().multiplyScalar(safeDistance));
+      this.camera.position.copy(safeCamPos);
+      this.smoothDistance = safeDistance;
+      this.targetDistance = safeDistance;
+      
+      // 如果正在跟踪，同步跟踪距离
+      if (this.isTracking) {
+        this.trackingDistance = safeDistance;
       }
-      // 直接更新 controls 的内部状态
+      
       this.controls.update();
     } else {
-      // 平滑过渡（保留原行为）
-      this.controls.target.lerp(newFocusPosition, smoothness);
-      if (CAMERA_PENETRATION_CONFIG.adjustCameraDistance) {
-        this.camera.position.lerp(desiredCameraPosition, smoothness);
-        this.smoothDistance = this.camera.position.distanceTo(this.controls.target);
-        this.targetDistance = Math.max(this.targetDistance, this.smoothDistance);
+      // 平滑修正：逐渐将相机移动到安全距离
+      const baseSmoothness = CAMERA_PENETRATION_CONFIG.constraintSmoothness;
+      const adaptiveSmoothness = baseSmoothness * (1 + penetrationRatio * 2);
+      const factor = Math.min(1, adaptiveSmoothness * Math.max(0.0001, deltaTime * 60));
+      
+      const easedFactor = this.easeOutQuart(factor);
+      const safeDistance = Math.max(minAllowedFromCenter, this.smoothDistance || minAllowedFromCenter);
+      const safeCamPos = center.clone().add(dirNorm.clone().multiplyScalar(safeDistance));
+      this.camera.position.lerp(safeCamPos, easedFactor);
+      
+      // Update smooth distance gradually
+      const currentDist = this.camera.position.distanceTo(center);
+      this.smoothDistance = THREE.MathUtils.lerp(this.smoothDistance, currentDist, easedFactor);
+      this.targetDistance = Math.max(this.targetDistance, this.smoothDistance);
+      
+      // 如果正在跟踪，同步跟踪距离
+      if (this.isTracking) {
+        this.trackingDistance = this.smoothDistance;
       }
+
+      this.controls.update();
     }
+
+    if (CAMERA_PENETRATION_CONFIG.debugMode) {
+      console.info('CameraController.applyPenetrationConstraint: applied', {
+        distToCenter,
+        minAllowedFromCenter,
+        penetrationDepth,
+        penetrationRatio,
+        isDeepPenetration
+      });
+    }
+  }
+
+  /**
+   * Easing function for smooth constraint application
+   */
+  private easeOutQuart(t: number): number {
+    return 1 - Math.pow(1 - t, 4);
+  }
+
+  /**
+   * Real-time penetration detection during user input
+   * Called during zoom and rotation operations to prevent penetration
+   */
+  private preventPenetrationDuringInput(proposedCameraPosition: THREE.Vector3, center: THREE.Vector3): THREE.Vector3 {
+    if (!this.currentTargetRadius) return proposedCameraPosition;
+
+    const minSafeDistance = this.currentTargetRadius * CAMERA_PENETRATION_CONFIG.safetyDistanceMultiplier;
+    const distanceToCenter = proposedCameraPosition.distanceTo(center);
+
+    if (distanceToCenter < minSafeDistance) {
+      // Calculate safe position on the ray from center to proposed position
+      const direction = new THREE.Vector3()
+        .subVectors(proposedCameraPosition, center)
+        .normalize();
+      
+      if (direction.length() < 0.001) {
+        direction.set(0, 0.5, 1).normalize();
+      }
+
+      return center.clone().add(direction.multiplyScalar(minSafeDistance));
+    }
+
+    return proposedCameraPosition;
   }
   
   /**
    * 停止跟踪目标
    */
-  stopTracking(): void {
+  stopTracking() {
     this.isTracking = false;
     this.trackingTargetGetter = null;
-    // 重置最小距离到默认值并清除行星约束信息
+    // 重置最小距离到默认值
     this.resetMinDistance();
   }
 
-  /**
-   * 动态调整近平面：防止相机靠近时因近平面裁剪而看不到行星
-   * 当相机靠近聚焦目标时，动态减小近平面距离，保证行星完整可见
-   */
-  private adjustNearPlane(): void {
-    // 支持任意聚焦对象（包括天梯）：使用 focusedPlanetPosition 优先，fallback 为 controls.target
-    const focusPos = (this.focusedPlanetPosition && this.focusedPlanetRadius > 0)
-      ? this.focusedPlanetPosition
-      : this.controls.target;
-
-    // 计算相机到焦点的距离与到“最近表面”的距离（考虑目标半径）
-    const cameraToFocus = new THREE.Vector3().subVectors(this.camera.position, focusPos);
-    const distanceToFocus = cameraToFocus.length();
-
-    // 估算目标半径：如果有 focusedPlanetRadius 则使用；否则使用一个保守的小值
-    const targetRadius = this.focusedPlanetRadius > 0 ? this.focusedPlanetRadius : Math.max(0.0001, distanceToFocus * 0.01);
-
-    // 计算相机到目标最近表面点的距离（确保非负）
-    const closestSurfaceDistance = Math.max(0.0, distanceToFocus - targetRadius);
-
-    const minNearPlane = CAMERA_VIEW_CONFIG.minNearPlane;
-    const multiplier = CAMERA_VIEW_CONFIG.dynamicNearPlaneMultiplier;
-
-    // 基本规则：nearPlane = max(minNearPlane, closestSurfaceDistance * multiplier)
-    let newNearPlane = Math.max(minNearPlane, closestSurfaceDistance * multiplier);
-
-    // 当与目标距离非常远时，逐步恢复为原始近平面以避免不必要的极小 near
-    const farThreshold = targetRadius * 20;
-    if (closestSurfaceDistance > farThreshold) {
-      const transitionStart = farThreshold;
-      const transitionEnd = farThreshold * 2;
-      if (closestSurfaceDistance > transitionEnd) {
-        newNearPlane = this.originalNearPlane;
-      } else {
-        const t = (closestSurfaceDistance - transitionStart) / (transitionEnd - transitionStart);
-        const dynamicValue = Math.max(minNearPlane, closestSurfaceDistance * multiplier);
-        newNearPlane = dynamicValue + (this.originalNearPlane - dynamicValue) * t;
-      }
-    }
-
-    // 只在变化明显时更新相机近平面
-    if (!isFinite(newNearPlane)) return;
-    if (Math.abs(this.camera.near - newNearPlane) > 1e-8) {
-      this.camera.near = newNearPlane;
-      this.camera.updateProjectionMatrix();
-
-      if (CAMERA_PENETRATION_CONFIG.debugMode) {
-        console.log(
-          `[DynamicNearPlane] focusPos=${focusPos.toArray().map(v=>v.toFixed(3))}, ` +
-          `dist=${distanceToFocus.toFixed(6)}, closestSurface=${closestSurfaceDistance.toFixed(6)}, ` +
-          `near=${newNearPlane.toExponential(6)}, radius=${targetRadius.toFixed(6)}`
-        );
-      }
-    }
-  }
-
-  // 手动缩放方法（带平滑效果）
-  zoom(delta: number): void {
+  // 手动缩放方法（带平滑效果和增强的防穿透）
+  zoom(delta: number) {
     // 如果正在聚焦，先停止聚焦
     if (this.isFocusing) {
       this.isFocusing = false;
       this.targetCameraPosition = null;
       this.targetControlsTarget = null;
       this.resetMinDistance();
-    }
-
-    // 如果焦点在行星上（focusedPlanetRadius > 0），使用 FOV 缩放而非距离缩放
-    // 这样可以防止相机穿透行星内部，而是通过减小视野来实现放大
-    if (this.focusedPlanetRadius > 0) {
-      // 使用 FOV 缩放模式
-      const baseFactor = 0.1; // FOV 缩放速度
-      const scrollSpeed = Math.min(Math.abs(delta), 3);
-      
-      // delta > 0 表示放大（减小 FOV），delta < 0 表示缩小（增大 FOV）
-      const fovDelta = delta > 0 
-        ? -(baseFactor * scrollSpeed) 
-        : (baseFactor * scrollSpeed);
-      
-      // 计算新的 FOV
-      const minFov = 5;   // 最小 FOV（最大放大）
-      const maxFov = 120; // 最大 FOV（最小放大）
-      this.targetFov = Math.max(minFov, Math.min(maxFov, this.currentFov + fovDelta));
-      this.isFovTransitioning = true;
-      
-      // 保持距离不变，只改变 FOV
-      return;
     }
     
     // ⚠️ 关键修复：缩放时不要停止跟踪，而是让跟踪使用缩放后的距离
@@ -770,7 +765,7 @@ export class CameraController {
     }
     
     // 计算缩放因子（类似2D版本，根据滚动速度调整）
-    const baseFactor = CAMERA_ZOOM_CONFIG.zoomBaseFactor;
+    const baseFactor = CAMERA_CONFIG.zoomBaseFactor;
     const scrollSpeed = Math.min(Math.abs(delta), 3); // 限制最大滚动速度影响
     // delta > 0 表示放大（拉近），delta < 0 表示缩小（拉远）
     // 在3D中，delta > 0 应该减小距离（拉近相机），delta < 0 应该增加距离（拉远相机）
@@ -779,22 +774,26 @@ export class CameraController {
       : 1 + (baseFactor * scrollSpeed);  // 增大距离（拉远/缩小）
     
     // 计算新的目标距离
-    const newTargetDistance = currentDistance * zoomFactor;
+    let newTargetDistance = currentDistance * zoomFactor;
     
-    // 关键修复：如果有聚焦的行星，应用防穿透约束，防止缩放进入行星内部
-    let constrainedDistance = newTargetDistance;
-    if (this.focusedPlanetRadius > 0 && this.focusedPlanetPosition) {
-      // 最小安全距离 = 行星半径 * 倍数（确保充分的防穿透间距）
-      // 使用较大的倍数（1.5）而不是 safetyDistanceMultiplier（1.05）以获得更安全的间距
-      const minSafeDistance = this.focusedPlanetRadius * 1.5;
-      constrainedDistance = Math.max(newTargetDistance, minSafeDistance);
+    // 增强的防穿透检查：在缩放时始终检查最小安全距离
+    if (this.currentTargetRadius) {
+      const minSafeDistance = this.currentTargetRadius * CAMERA_PENETRATION_CONFIG.safetyDistanceMultiplier;
+      
+      // 无论是放大还是缩小，都确保不会低于最小安全距离
+      newTargetDistance = Math.max(newTargetDistance, minSafeDistance);
+      
+      // 如果当前距离已经小于安全距离，强制设置为安全距离
+      if (currentDistance < minSafeDistance) {
+        newTargetDistance = minSafeDistance;
+        this.smoothDistance = minSafeDistance;
+      }
     }
     
-    // 更新目标距离（支持无限放大到极小距离）
-    // 允许距离降到极小值（如 0.00001 AU）以支持像地图软件那样的无限放大
+    // 更新目标距离（限制在合理范围内）
     this.targetDistance = Math.max(
-      CAMERA_ZOOM_CONFIG.minDistance,
-      Math.min(this.controls.maxDistance, constrainedDistance)
+      0,
+      Math.min(this.controls.maxDistance, newTargetDistance)
     );
     
     // 同步平滑距离，确保缩放从当前位置开始
@@ -807,7 +806,20 @@ export class CameraController {
     }
   }
 
-  update(deltaTime: number): void {
+  update(deltaTime: number) {
+    // Update focus manager transitions
+    const focusProgress = this.focusManager.updateFocusTransition(deltaTime);
+    if (focusProgress >= 0 && focusProgress < 1) {
+      // Apply easing to focus transition
+      const easedProgress = FocusManager.easeInOutCubic(focusProgress);
+      // Focus transition is handled by existing isFocusing logic below
+    }
+    
+    // Handle user interruption of focus transitions
+    if (this.focusManager.isCurrentlyTransitioning() && (this.isZooming || this.isTracking)) {
+      this.focusManager.interruptTransition();
+    }
+    
     // 处理 FOV 平滑过渡
     if (this.isFovTransitioning) {
       const fovDiff = this.targetFov - this.currentFov;
@@ -825,6 +837,9 @@ export class CameraController {
       }
     }
     
+    
+    // 每帧应用防穿透约束，确保相机不会进入行星内部
+    this.applyPenetrationConstraint(deltaTime);
     // 处理相机左右角度平滑过渡
     if (this.isAzimuthalAngleTransitioning) {
       // ⚠️ 重要：不要在每帧都从 spherical.theta 同步角度，这会导致振荡
@@ -977,8 +992,8 @@ export class CameraController {
     
     // 处理聚焦动画（仅在非跟踪模式下）
     if (!this.isTracking && this.isFocusing && this.targetCameraPosition && this.targetControlsTarget) {
-      const cameraLerpSpeed = CAMERA_FOCUS_CONFIG.focusLerpSpeed;
-      const targetLerpSpeed = CAMERA_FOCUS_CONFIG.focusLerpSpeed;
+      const cameraLerpSpeed = CAMERA_CONFIG.focusLerpSpeed;
+      const targetLerpSpeed = CAMERA_CONFIG.focusLerpSpeed;
       
       this.camera.position.lerp(this.targetCameraPosition, cameraLerpSpeed);
       this.controls.target.lerp(this.targetControlsTarget, targetLerpSpeed);
@@ -987,7 +1002,7 @@ export class CameraController {
       const cameraDist = this.camera.position.distanceTo(this.targetCameraPosition);
       const targetDist = this.controls.target.distanceTo(this.targetControlsTarget);
       
-      if (cameraDist < CAMERA_FOCUS_CONFIG.focusThreshold && targetDist < CAMERA_FOCUS_CONFIG.focusThreshold) {
+      if (cameraDist < CAMERA_CONFIG.focusThreshold && targetDist < CAMERA_CONFIG.focusThreshold) {
         // 到达目标位置后，停止聚焦动画，允许用户自由移动视角
         this.isFocusing = false;
         this.targetCameraPosition = null;
@@ -1027,7 +1042,7 @@ export class CameraController {
       if (Math.abs(distanceDiff) > 0.01) {
         // 使用缓动函数实现平滑过渡（ease-out），与2D版本一致
         // 使用更快的缓动速度，让缩放更流畅
-        const speed = CAMERA_ZOOM_CONFIG.zoomEasingSpeed;
+        const speed = CAMERA_CONFIG.zoomEasingSpeed;
         this.smoothDistance += distanceDiff * speed;
         
         // 如果正在跟踪，更新跟踪距离（让跟踪逻辑使用缩放后的距离）
@@ -1056,9 +1071,22 @@ export class CameraController {
         }
         
         // 计算新的相机位置
-        const newPosition = new THREE.Vector3()
+        let newPosition = new THREE.Vector3()
           .copy(this.controls.target)
           .add(direction.multiplyScalar(this.smoothDistance));
+        
+        // Enhanced penetration prevention during smooth zoom
+        if (this.currentTargetRadius) {
+          const center = this.trackingTargetGetter ? this.trackingTargetGetter() : this.controls.target;
+          newPosition = this.preventPenetrationDuringInput(newPosition, center);
+          
+          // Update smooth distance if position was corrected
+          const correctedDistance = newPosition.distanceTo(this.controls.target);
+          if (Math.abs(correctedDistance - this.smoothDistance) > 0.01) {
+            this.smoothDistance = correctedDistance;
+            this.targetDistance = Math.max(this.targetDistance, this.smoothDistance);
+          }
+        }
         
         // ⚠️ 关键修复：如果正在跟踪，直接设置位置（不使用 lerp，避免被跟踪逻辑覆盖）
         // 如果不在跟踪，也可以直接设置（因为我们已经有平滑距离）
@@ -1078,6 +1106,8 @@ export class CameraController {
         }
       }
     }
+    
+    // 处理跟踪模式（如果正在跟踪目标）
     // ⚠️ 重要：跟踪逻辑在缩放逻辑之后执行，使用缩放后的距离
     if (this.isTracking && this.trackingTargetGetter) {
       const currentTargetPosition = this.trackingTargetGetter();
@@ -1086,7 +1116,7 @@ export class CameraController {
         // 直接使用缩放后的位置，只更新目标位置
         if (this.isZooming) {
           // 缩放中：只更新 controls.target，保持相机位置不变（由缩放逻辑控制）
-          this.controls.target.lerp(currentTargetPosition, CAMERA_TRACKING_CONFIG.trackingLerpSpeed);
+          this.controls.target.lerp(currentTargetPosition, CAMERA_CONFIG.trackingLerpSpeed);
           // 同步更新 trackingDistance，确保缩放完成后使用正确的距离
           this.trackingDistance = this.smoothDistance;
         } else {
@@ -1117,8 +1147,8 @@ export class CameraController {
             .add(currentDirection.multiplyScalar(trackingDist));
           
           // 平滑移动相机和目标（跟随目标）
-          this.camera.position.lerp(newCameraPosition, CAMERA_TRACKING_CONFIG.trackingLerpSpeed);
-          this.controls.target.lerp(currentTargetPosition, CAMERA_TRACKING_CONFIG.trackingLerpSpeed);
+          this.camera.position.lerp(newCameraPosition, CAMERA_CONFIG.trackingLerpSpeed);
+          this.controls.target.lerp(currentTargetPosition, CAMERA_CONFIG.trackingLerpSpeed);
         }
         
         // 更新 controls
@@ -1138,15 +1168,6 @@ export class CameraController {
     
     // 更新 OrbitControls（这会应用旋转和平移的阻尼效果）
     this.controls.update();
-    
-    // ⚠️ 关键：应用防穿透约束（防止相机穿过行星表面）
-    // 这个约束在最后应用，确保不会被其他逻辑覆盖
-    // 在 controls.update() 之后调用，这样约束才能有效
-    this.applyPenetrationConstraint();
-    
-    // ⚠️ 关键：动态调整近平面（防止相机靠近时因近平面裁剪而看不到行星）
-    // 这个调整在防穿透约束之后，确保近平面配合约束工作
-    this.adjustNearPlane();
   }
 
   getControls(): OrbitControls {
@@ -1154,17 +1175,17 @@ export class CameraController {
   }
 
   // FOV 平滑过渡相关
-  private targetFov: number = CAMERA_VIEW_CONFIG.fov;
-  private currentFov: number = CAMERA_VIEW_CONFIG.fov;
+  private targetFov: number = CAMERA_CONFIG.fov;
+  private currentFov: number = CAMERA_CONFIG.fov;
   private isFovTransitioning: boolean = false;
-  private fovTransitionSpeed: number = CAMERA_VIEW_CONFIG.fovTransitionSpeed;
+  private fovTransitionSpeed: number = 0.15; // FOV 过渡速度（0-1，越大越快）
 
   /**
    * 设置相机视野角度（FOV）
    * @param fov 视野角度（度）
    * @param smooth 是否平滑过渡（默认 false，立即切换）
    */
-  setFov(fov: number, smooth: boolean = false): void {
+  setFov(fov: number, smooth = false) {
     if (!isFinite(fov) || fov <= 0 || fov >= 180) {
       console.warn('CameraController.setFov: Invalid FOV value', fov);
       return;
@@ -1188,7 +1209,7 @@ export class CameraController {
   /**
    * 获取当前相机视野角度（FOV）
    */
-  getFov(): number {
+  getFov() {
     return this.camera.fov;
   }
 

@@ -12,15 +12,15 @@ import { HEADER_CONFIG } from "@/lib/config/visualConfig";
 export default function SolarSystemPage() {
   const { viewMode } = useSolarSystemStore();
   
-  // 计算顶部偏移（Header高度）
-  const headerHeight = HEADER_CONFIG.enabled ? HEADER_CONFIG.height : 0;
+  // 计算顶部偏移（Header高度）- 漂浮模式下不需要预留空间
+  const headerHeight = (HEADER_CONFIG.enabled && !HEADER_CONFIG.floatingMode) ? HEADER_CONFIG.height : 0;
 
   return (
     <div 
       className="w-screen flex flex-col overflow-hidden touch-none relative"
       style={{ height: '100vh' }}
     >
-      {/* 主容器，留出Header高度空间 */}
+      {/* 主容器，漂浮模式下不需要留出Header高度空间 */}
       <div 
         className="flex-1 relative min-h-0 flex flex-col"
         style={{ 

@@ -15,7 +15,8 @@
 
 import * as THREE from 'three';
 import type { CelestialBody } from '@/lib/astronomy/orbit';
-import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS, PLANET_LOD_CONFIG } from '@/lib/config/visualConfig';
+import { CelestialBodyConfig, rotationPeriodToSpeed } from '@/lib/types/celestialTypes';
+import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS, PLANET_LOD_CONFIG, PLANET_GRID_CONFIG } from '@/lib/config/visualConfig';
 
 // 真实行星半径（AU单位）
 // 1 AU = 149,597,870 km
@@ -34,8 +35,15 @@ const REAL_PLANET_RADII: Record<string, number> = {
 };
 
 export interface PlanetConfig {
-  body: CelestialBody;
-  rotationSpeed: number; // 弧度/秒
+  body?: CelestialBody; // Optional for backward compatibility
+  config?: CelestialBodyConfig; // Optional celestial body configuration with rotation period
+  rotationSpeed?: number; // 弧度/秒 (deprecated, use config.rotationPeriod instead)
+  
+  // Direct CelestialBodyConfig properties (for test compatibility)
+  name?: string;
+  radius?: number;
+  color?: string;
+  rotationPeriod?: number;
 }
 
 export class Planet {
@@ -51,17 +59,54 @@ export class Planet {
   private targetOpacity: number = 0; // 目标透明度
   private glowMesh: THREE.Mesh | null = null; // 太阳光晕网格
   private rainbowSprites: THREE.Sprite[] = [];
+  private gridGroup: THREE.Group | null = null; // 经纬线组
   private isSun: boolean = false; // 是否为太阳
   private currentSegments: number = 32; // 当前分段数（用于平滑过渡）
   private targetSegments: number = 32; // 目标分段数
+  
+  // Rotation tracking for pause/resume functionality
+  private lastUpdateTime: number = 0; // Last time updateRotation was called
+  private accumulatedRotation: number = 0; // Accumulated rotation from previous updates
 
   constructor(config: PlanetConfig) {
-    this.rotationSpeed = config.rotationSpeed;
-    this.isSun = config.body.isSun || false;
+    // Handle both old PlanetConfig (with body) and new CelestialBodyConfig (direct properties)
+    let celestialConfig: CelestialBodyConfig | undefined;
+    let bodyInfo: { name: string; color: string; radius: number; isSun?: boolean };
+    
+    if (config.body) {
+      // Old style: config has body property
+      celestialConfig = config.config;
+      bodyInfo = {
+        name: config.body.name,
+        color: config.body.color,
+        radius: config.body.radius,
+        isSun: config.body.isSun
+      };
+    } else {
+      // New style: config is CelestialBodyConfig-like (for tests)
+      celestialConfig = config as CelestialBodyConfig;
+      bodyInfo = {
+        name: config.name || 'Unknown',
+        color: config.color || '#FFFFFF',
+        radius: config.radius || 0.01,
+        isSun: false
+      };
+    }
+    
+    // Calculate rotation speed from rotation period if available
+    if (celestialConfig?.rotationPeriod) {
+      this.rotationSpeed = rotationPeriodToSpeed(celestialConfig.rotationPeriod);
+    } else if (config.rotationPeriod) {
+      this.rotationSpeed = rotationPeriodToSpeed(config.rotationPeriod);
+    } else {
+      this.rotationSpeed = config.rotationSpeed || 0;
+    }
+    
+    this.isSun = bodyInfo.isSun || false;
     
     // 使用真实行星半径（AU单位）
-    const planetName = config.body.name.toLowerCase();
-    this.realRadius = REAL_PLANET_RADII[planetName] || config.body.radius;
+    const planetName = bodyInfo.name.toLowerCase();
+    this.realRadius = REAL_PLANET_RADII[planetName] || bodyInfo.radius;
     
     // 使用真实半径创建行星
     const radius = this.realRadius;
@@ -73,9 +118,9 @@ export class Planet {
 
     // 创建材质
     this.material = new THREE.MeshStandardMaterial({
-      color: config.body.color || 0xffffff,
-      emissive: config.body.isSun ? 0xffffaa : 0x000000, // 太阳使用更亮的黄色发光
-      emissiveIntensity: config.body.isSun ? 2.0 : 0, // 增加太阳的发光强度
+      color: bodyInfo.color || 0xffffff,
+      emissive: bodyInfo.isSun ? 0xffffaa : 0x000000, // 太阳使用更亮的黄色发光
+      emissiveIntensity: bodyInfo.isSun ? 2.0 : 0, // 增加太阳的发光强度
     });
 
     // 创建网格
@@ -87,6 +132,72 @@ export class Planet {
     }
     
     // 注意：标记圈在外部通过 createMarkerCircle() 方法创建
+    // 创建经纬线（如果启用）
+    if (PLANET_GRID_CONFIG.enabled && !this.isSun) {
+      this.createLatLonGrid();
+    }
+  }
+
+  /**
+   * 创建经纬线网格（细线，略微向外偏移避免与星球表面 Z-fighting）
+   */
+  private createLatLonGrid(): void {
+    const cfg = PLANET_GRID_CONFIG;
+    const radius = this.realRadius;
+    // 使用相对于半径的偏移量，确保网格始终贴近表面
+    const outward = radius * (cfg.outwardOffset || 0.002); // 相对偏移量
+    const segs = Math.max(12, cfg.segments || 96);
+
+    this.gridGroup = new THREE.Group();
+    const lineMat = new THREE.LineBasicMaterial({
+      color: new THREE.Color(cfg.color),
+      transparent: true,
+      opacity: cfg.opacity,
+      depthWrite: false,
+      depthTest: true, // 确保深度测试正常工作
+    });
+
+    // 经线（固定经度，变化纬度）
+    for (let i = 0; i < cfg.meridians; i++) {
+      const lon = (i / cfg.meridians) * Math.PI * 2;
+      const pts: THREE.Vector3[] = [];
+      for (let j = 0; j <= segs; j++) {
+        const lat = -Math.PI / 2 + (j / segs) * Math.PI;
+        const r = radius + outward;
+        const x = r * Math.cos(lat) * Math.cos(lon);
+        const y = r * Math.sin(lat);
+        const z = r * Math.cos(lat) * Math.sin(lon);
+        pts.push(new THREE.Vector3(x, y, z));
+      }
+      const geom = new THREE.BufferGeometry().setFromPoints(pts);
+      const line = new THREE.Line(geom, lineMat);
+      this.gridGroup.add(line);
+    }
+
+    // 纬线（固定纬度，变化经度）
+    for (let i = 1; i <= cfg.parallels; i++) {
+      const lat = -Math.PI / 2 + (i / (cfg.parallels + 1)) * Math.PI;
+      const pts: THREE.Vector3[] = [];
+      for (let j = 0; j <= segs; j++) {
+        const lon = (j / segs) * Math.PI * 2;
+        const r = radius + outward;
+        const x = r * Math.cos(lat) * Math.cos(lon);
+        const y = r * Math.sin(lat);
+        const z = r * Math.cos(lat) * Math.sin(lon);
+        pts.push(new THREE.Vector3(x, y, z));
+      }
+      const geom = new THREE.BufferGeometry().setFromPoints(pts);
+      const line = new THREE.Line(geom, lineMat);
+      this.gridGroup.add(line);
+    }
+
+    // 将经纬线添加为行星的子对象，保持与行星一起移动/旋转
+    if (this.gridGroup) {
+      this.mesh.add(this.gridGroup);
+      
+      // 网格位于星球中心，不需要额外缩放（偏移已经在计算中处理）
+      this.gridGroup.position.set(0, 0, 0);
+    }
   }
   
   /**
@@ -319,13 +430,86 @@ export class Planet {
   }
 
   /**
-   * 更新自转
+   * 更新星球自转
+   * @param currentTime 当前时间（天）
+   * @param timeSpeed 时间速度倍数
    */
-  updateRotation(deltaTime: number): void {
-    if (this.rotationSpeed > 0) {
-      this.currentRotation += this.rotationSpeed * deltaTime;
-      this.mesh.rotation.y = this.currentRotation;
+  updateRotation(currentTime: number, timeSpeed: number = 1): void {
+    if (this.rotationSpeed === 0) {
+      this.lastUpdateTime = currentTime;
+      return;
     }
+    
+    // Calculate incremental rotation since last update
+    const deltaTime = currentTime - this.lastUpdateTime;
+    
+    // If time is paused (timeSpeed = 0), don't add rotation but update time
+    if (timeSpeed === 0) {
+      this.lastUpdateTime = currentTime;
+      return;
+    }
+
+    const deltaTimeInSeconds = deltaTime * 24 * 3600; // Convert days to seconds
+    const deltaRotation = this.rotationSpeed * deltaTimeInSeconds * timeSpeed;
+    
+    // Accumulate rotation
+    this.accumulatedRotation += deltaRotation;
+    
+    // Apply rotation to the mesh
+    this.mesh.rotation.y = this.accumulatedRotation;
+    
+    // Update last update time
+    this.lastUpdateTime = currentTime;
+    
+    // Since the grid is a child of the mesh, it will automatically rotate with the planet
+    // This creates the visual effect of the latitude/longitude lines rotating with the planet
+  }
+
+  /**
+   * 设置经纬线网格的可见性
+   */
+  setGridVisible(visible: boolean): void {
+    if (this.gridGroup) {
+      this.gridGroup.visible = visible;
+    }
+  }
+  
+  /**
+   * 获取经纬线网格的可见性
+   */
+  getGridVisible(): boolean {
+    return this.gridGroup ? this.gridGroup.visible : false;
+  }
+
+  /**
+   * 更新网格可见性（基于相机距离）
+   * @param distance 相机到星球中心的距离（world units）
+   */
+  updateGridVisibility(distance: number): void {
+    if (!this.gridGroup) return;
+    
+    // 根据距离调整网格不透明度
+    // 距离越近，网格越清晰；距离越远，网格越淡
+    const minDistance = this.realRadius * 2; // 最小距离（网格完全可见）
+    const maxDistance = this.realRadius * 50; // 最大距离（网格开始淡出）
+    
+    let opacity = PLANET_GRID_CONFIG.opacity;
+    if (distance > minDistance) {
+      const fadeRange = maxDistance - minDistance;
+      const fadeProgress = Math.min(1, (distance - minDistance) / fadeRange);
+      opacity = PLANET_GRID_CONFIG.opacity * (1 - fadeProgress * 0.7); // 最多淡化70%
+    }
+    
+    // 更新所有网格线的不透明度
+    this.gridGroup.traverse((child) => {
+      if (child instanceof THREE.Line) {
+        const material = child.material as THREE.LineBasicMaterial;
+        if (material) {
+          material.opacity = opacity;
+          material.needsUpdate = true;
+        }
+      }
+    });
   }
 
   /**
@@ -400,6 +584,20 @@ export class Planet {
     if (this.markerDiv && this.markerDiv.parentNode) {
       this.markerDiv.parentNode.removeChild(this.markerDiv);
     }
+    if (this.gridGroup) {
+      // 释放经纬线几何体与材质
+      this.gridGroup.traverse((c) => {
+        if ((c as any).geometry) {
+          (c as any).geometry.dispose();
+        }
+        if ((c as any).material) {
+          (c as any).material.dispose();
+        }
+      });
+      if (this.gridGroup.parent) this.gridGroup.parent.remove(this.gridGroup);
+      this.gridGroup = null;
+    }
+
     this.geometry.dispose();
     this.material.dispose();
   }

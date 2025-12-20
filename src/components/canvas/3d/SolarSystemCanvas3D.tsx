@@ -29,6 +29,7 @@ import { SATELLITE_DEFINITIONS } from '@/lib/astronomy/orbit';
 import { dateToJulianDay } from '@/lib/astronomy/time';
 import { ORBITAL_ELEMENTS } from '@/lib/astronomy/orbit';
 import { planetNames } from '@/lib/astronomy/names';
+import { CELESTIAL_BODIES } from '@/lib/types/celestialTypes';
 import * as THREE from 'three';
 import { Raycaster } from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
@@ -44,7 +45,7 @@ import { ORBIT_COLORS, SUN_LIGHT_CONFIG, ORBIT_CURVE_POINTS, SATELLITE_CONFIG } 
 // 行星自转速度（弧度/秒，简化值）
 const ROTATION_SPEEDS: Record<string, number> = {
   mercury: 0.000000124, // 约 58.6 天/转
-  venus: 0.000000116,   // 约 243 天/转（逆行）
+  venus: -0.000000116,  // 约 243 天/转（逆行，负值表示反向旋转）
   earth: 0.0000727,     // 约 24 小时/转
   mars: 0.0000709,      // 约 24.6 小时/转
   jupiter: 0.000175,    // 约 9.9 小时/转
@@ -263,9 +264,11 @@ export default function SolarSystemCanvas3D() {
       // 创建太阳
       const sunBody = initialState.celestialBodies.find((b: any) => b.isSun);
       if (sunBody) {
+        const sunConfig = CELESTIAL_BODIES.sun;
         const sunPlanet = new Planet({
           body: sunBody,
-          rotationSpeed: ROTATION_SPEEDS.sun || 0,
+          config: sunConfig,
+          rotationSpeed: ROTATION_SPEEDS.sun || 0, // Fallback to old system
         });
         const sunMesh = sunPlanet.getMesh();
         sunMesh.position.set(0, 0, 0);
@@ -312,13 +315,19 @@ export default function SolarSystemCanvas3D() {
         const isSatellite = !!body.parent;
 
         // 创建天体（行星或卫星）
+        const bodyKey = body.name.toLowerCase();
+        const celestialConfig = CELESTIAL_BODIES[bodyKey];
         const planet = new Planet({
           body,
-          rotationSpeed: ROTATION_SPEEDS[body.name.toLowerCase()] || 0,
+          config: celestialConfig,
+          rotationSpeed: ROTATION_SPEEDS[bodyKey] || 0, // Fallback to old system
         });
         planet.updatePosition(body.x, body.y, body.z);
         const planetMesh = planet.getMesh();
         scene.add(planetMesh);
+        // 暴露真实半径，供相机约束或其他逻辑使用（单位：AU）
+        (planetMesh as any).userData = (planetMesh as any).userData || {};
+        (planetMesh as any).userData.radius = planet.getRealRadius();
         planetsRef.current.set(body.name.toLowerCase(), planet);
 
         // 创建标记圈（2D）
@@ -403,7 +412,10 @@ export default function SolarSystemCanvas3D() {
           const planet = planetsRef.current.get(key);
           if (planet) {
             planet.updatePosition(body.x, body.y, body.z);
-            planet.updateRotation(deltaTime);
+            
+            // 更新星球自转 - 使用当前时间和时间速度
+            const currentTimeInDays = dateToJulianDay(currentState.currentTime) - 2451545.0; // Days since J2000.0
+            planet.updateRotation(currentTimeInDays, currentState.timeSpeed);
             
             // 计算相机到星球的距离并更新 LOD
             const planetWorldPos = new THREE.Vector3(body.x, body.y, body.z);
@@ -411,11 +423,21 @@ export default function SolarSystemCanvas3D() {
             const distance = planetWorldPos.distanceTo(cameraPos);
             planet.updateLOD(distance);
             
-            // 更新轨道渐变（如果轨道存在）
+            // 更新网格可见性
+            planet.updateGridVisibility(distance);
+            
+            // 更新轨道渐变和自适应分辨率（如果轨道存在）
             const orbit = orbitsRef.current.get(key);
             if (orbit) {
               const planetPosition = new THREE.Vector3(body.x, body.y, body.z);
               orbit.updatePlanetPosition(planetPosition);
+              
+              // Update adaptive orbit curve resolution based on camera distance
+              // Calculate distance from camera to orbit center (planet position)
+              const orbitCenterDistance = cameraPos.distanceTo(planetPosition);
+              if (orbit.updateCurveResolution) {
+                orbit.updateCurveResolution(orbitCenterDistance);
+              }
             }
           }
         });
@@ -458,6 +480,9 @@ export default function SolarSystemCanvas3D() {
           const cameraPos = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
           const sunDistance = sunWorldPos.distanceTo(cameraPos);
           sunPlanet.updateLOD(sunDistance);
+          
+          // 更新网格可见性（太阳通常不显示网格，但保持一致性）
+          sunPlanet.updateGridVisibility(sunDistance);
           
           // 太阳标签始终显示（不参与重叠检测）
           const sunLabel = labelsRef.current.get('sun');
@@ -751,9 +776,59 @@ export default function SolarSystemCanvas3D() {
       // 创建射线投射器（用于点击检测）
       raycasterRef.current = new Raycaster();
       
+      // 拖动检测变量
+      let isDragging = false;
+      let mouseDownPosition = { x: 0, y: 0 };
+      let mouseDownTime = 0;
+      const dragThreshold = 5; // 像素阈值，超过此距离认为是拖动
+      const clickTimeThreshold = 300; // 毫秒阈值，超过此时间认为是长按
+      
+      // 处理鼠标按下（开始拖动检测）
+      const handleMouseDown = (event: MouseEvent) => {
+        isDragging = false;
+        mouseDownPosition.x = event.clientX;
+        mouseDownPosition.y = event.clientY;
+        mouseDownTime = Date.now();
+      };
+      
+      // 处理鼠标移动（检测拖动）
+      const handleMouseMove = (event: MouseEvent) => {
+        if (mouseDownTime > 0) {
+          const deltaX = event.clientX - mouseDownPosition.x;
+          const deltaY = event.clientY - mouseDownPosition.y;
+          const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+          
+          if (distance > dragThreshold) {
+            isDragging = true;
+          }
+        }
+      };
+      
+      // 处理鼠标抬起（重置拖动状态）
+      const handleMouseUp = () => {
+        // 延迟重置，确保 click 事件能正确检测到拖动状态
+        setTimeout(() => {
+          isDragging = false;
+          mouseDownTime = 0;
+        }, 10);
+      };
+      
       // 处理鼠标点击（聚焦到行星）
       const handleClick = (event: MouseEvent) => {
         if (!containerRef.current || !raycasterRef.current || !sceneManagerRef.current || !cameraControllerRef.current) return;
+        
+        // 如果是拖动操作，不执行聚焦
+        if (isDragging) {
+          console.log('Click ignored: detected as drag operation');
+          return;
+        }
+        
+        // 如果是长按操作，不执行聚焦
+        const clickDuration = Date.now() - mouseDownTime;
+        if (clickDuration > clickTimeThreshold) {
+          console.log('Click ignored: detected as long press');
+          return;
+        }
         
         const rect = containerRef.current.getBoundingClientRect();
         mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -763,11 +838,15 @@ export default function SolarSystemCanvas3D() {
         raycasterRef.current.setFromCamera(mouseRef.current, camera);
         
         // 检测所有行星（包括标记圈和标签）
-        const intersects: Array<{ planet: Planet; body: any; distance: number; type: 'mesh' | 'marker' | 'label' }> = [];
+        const intersects: Array<{ planet: Planet; body: any; distance: number; type: 'mesh' | 'marker' | 'label'; isSatellite: boolean }> = [];
         const currentBodies = useSolarSystemStore.getState().celestialBodies;
         
+        // 检测所有天体：行星和卫星
         currentBodies.forEach((body: any) => {
-          // 太阳也可以点击聚焦
+          // 检查是否为卫星
+          const isSatellite = Object.values(SATELLITE_DEFINITIONS).some((sats: any) => 
+            sats.some((sat: any) => sat.name.toLowerCase() === body.name.toLowerCase())
+          ) || body.parentBody;
           
           const key = body.name.toLowerCase();
           const planet = planetsRef.current.get(key);
@@ -781,6 +860,7 @@ export default function SolarSystemCanvas3D() {
                 body,
                 distance: meshIntersect[0].distance,
                 type: 'mesh',
+                isSatellite,
               });
             }
             
@@ -808,6 +888,7 @@ export default function SolarSystemCanvas3D() {
                   body,
                   distance: 0, // 标记圈点击优先级最高
                   type: 'marker',
+                  isSatellite,
                 });
               }
             }
@@ -843,52 +924,77 @@ export default function SolarSystemCanvas3D() {
                   body,
                   distance: 0, // 标签点击优先级最高
                   type: 'label',
+                  isSatellite,
                 });
               }
             }
           }
         });
         
-        // 选择最近的行星（优先选择标记圈或标签）
+        // 选择最近的行星（只接受标记圈、标签或星球网格的直接点击）
         if (intersects.length > 0) {
-          // 优先选择标记圈或标签点击
+          // 优先选择标记圈或标签点击，这些是用户明确想要聚焦的
           const markerOrLabelClick = intersects.find(i => i.type === 'marker' || i.type === 'label');
-          const target = markerOrLabelClick || intersects.sort((a, b) => a.distance - b.distance)[0];
           
-          // 选中行星
-          const selectedPlanetName = target.body.name;
-          useSolarSystemStore.getState().selectPlanet(selectedPlanetName);
+          // 如果没有标记圈或标签点击，检查是否有星球网格的直接点击
+          const meshClick = intersects.find(i => i.type === 'mesh');
           
-          // 平滑移动相机到行星位置（放大显示）
-          const targetPosition = new THREE.Vector3(target.body.x, target.body.y, target.body.z);
-          // 根据行星大小计算合适的观察距离
-          // 新特性：相机可以无限放大到行星表面（类似地图软件），用户可继续缩放查看细节
-          const planetRadius = target.planet.getRealRadius();
-          // 使用极小的倍数（0.5）使初始聚焦距离非常接近行星表面
-          const minDistance = Math.max(planetRadius * FOCUS_CONFIG.distanceMultiplier, FOCUS_CONFIG.minDistance);
-          const targetDistance = minDistance;
+          // 只有在点击了标记圈、标签或星球网格时才聚焦
+          const target = markerOrLabelClick || meshClick;
           
-          // 创建跟踪函数，用于获取行星的实时位置
-          const trackingTargetGetter = () => {
-            const currentBodies = useSolarSystemStore.getState().celestialBodies;
-            const currentBody = currentBodies.find((b: any) => b.name === selectedPlanetName);
-            if (currentBody) {
-              return new THREE.Vector3(currentBody.x, currentBody.y, currentBody.z);
-            }
-            // 如果找不到行星，返回当前位置（不应该发生）
-            return targetPosition.clone();
-          };
-          
-          // 传入行星半径，让 CameraController 允许无限放大
-          cameraControllerRef.current.focusOnTarget(targetPosition, targetDistance, trackingTargetGetter, planetRadius);
+          if (target) {
+            // 选中行星
+            const selectedPlanetName = target.body.name;
+            useSolarSystemStore.getState().selectPlanet(selectedPlanetName);
+            
+            // Log the type of object clicked
+            const objectType = target.isSatellite ? 'satellite' : 'planet';
+            console.log(`Focusing on ${objectType}: ${selectedPlanetName} (clicked ${target.type})`);
+            
+            // 平滑移动相机到行星位置（放大显示）
+            const targetPosition = new THREE.Vector3(target.body.x, target.body.y, target.body.z);
+            
+            // 创建天体对象用于FocusManager
+            const planetRadius = target.planet.getRealRadius();
+            const celestialObject = {
+              name: selectedPlanetName,
+              radius: planetRadius,
+              type: selectedPlanetName.toLowerCase() === 'sun' ? 'star' as const : 'planet' as const
+            };
+            
+            // 创建跟踪函数，用于获取行星的实时位置
+            const trackingTargetGetter = () => {
+              const currentBodies = useSolarSystemStore.getState().celestialBodies;
+              const currentBody = currentBodies.find((b: any) => b.name === selectedPlanetName);
+              if (currentBody) {
+                return new THREE.Vector3(currentBody.x, currentBody.y, currentBody.z);
+              }
+              // 如果找不到行星，返回当前位置（不应该发生）
+              return targetPosition.clone();
+            };
+            
+            // 使用新的FocusManager API进行聚焦
+            cameraControllerRef.current.focusOnTarget(
+              targetPosition, 
+              celestialObject, 
+              trackingTargetGetter
+            );
+          }
+          // 如果没有有效的点击目标（比如点击了空白区域），不执行任何操作
         }
       };
       
       // 使用已经声明的 renderer 变量
+      renderer.domElement.addEventListener('mousedown', handleMouseDown);
+      renderer.domElement.addEventListener('mousemove', handleMouseMove);
+      renderer.domElement.addEventListener('mouseup', handleMouseUp);
       renderer.domElement.addEventListener('click', handleClick);
       
       // 也在 labelRenderer 的 DOM 元素上添加点击事件（用于点击标签和标记圈）
       if (labelRendererRef.current) {
+        labelRendererRef.current.domElement.addEventListener('mousedown', handleMouseDown);
+        labelRendererRef.current.domElement.addEventListener('mousemove', handleMouseMove);
+        labelRendererRef.current.domElement.addEventListener('mouseup', handleMouseUp);
         labelRendererRef.current.domElement.addEventListener('click', handleClick);
       }
 
@@ -930,7 +1036,16 @@ export default function SolarSystemCanvas3D() {
         
         // 清理事件监听器
         if (sceneManagerRef.current && renderer) {
+          renderer.domElement.removeEventListener('mousedown', handleMouseDown);
+          renderer.domElement.removeEventListener('mousemove', handleMouseMove);
+          renderer.domElement.removeEventListener('mouseup', handleMouseUp);
           renderer.domElement.removeEventListener('click', handleClick);
+        }
+        if (labelRendererRef.current) {
+          labelRendererRef.current.domElement.removeEventListener('mousedown', handleMouseDown);
+          labelRendererRef.current.domElement.removeEventListener('mousemove', handleMouseMove);
+          labelRendererRef.current.domElement.removeEventListener('mouseup', handleMouseUp);
+          labelRendererRef.current.domElement.removeEventListener('click', handleClick);
         }
         window.removeEventListener('resize', handleResize);
         resizeObserver.disconnect();
