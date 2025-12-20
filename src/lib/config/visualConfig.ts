@@ -480,3 +480,221 @@ export const PLANET_GRID_CONFIG = {
   segments: 96,
   outwardOffset: 0.002, // 使用相对于半径的比例（0.2%），而不是绝对值
 };
+
+/**
+ * 行星轴倾角配置（Axial Tilt / Obliquity）
+ * 
+ * 定义每个行星相对于黄道面的轴倾角（度）
+ * 用于正确显示行星贴图的南北极方向
+ * 
+ * 注意：
+ * - 正值表示北极向黄道面北方倾斜
+ * - 负值或大于90度表示逆行自转（如金星、天王星）
+ * - 这是渲染层配置，不影响物理计算
+ * 
+ * 数据来源：NASA Planetary Fact Sheet
+ */
+export const PLANET_AXIAL_TILT: Record<string, number> = {
+  // 太阳轴倾角约 7.25°（相对于黄道面）
+  sun: 7.25,
+  
+  // 八大行星
+  mercury: 0.034,    // 几乎无倾斜
+  venus: 177.4,      // 逆行自转，几乎倒置
+  earth: 23.44,      // 地球轴倾角
+  mars: 25.19,       // 与地球相似
+  jupiter: 3.13,     // 几乎直立
+  saturn: 26.73,     // 与地球相似
+  uranus: 97.77,     // 几乎躺着转
+  neptune: 28.32,    // 与地球相似
+  
+  // 卫星（相对于其轨道面）
+  moon: 6.68,        // 月球轴倾角
+  io: 0.05,          // 潮汐锁定，几乎无倾斜
+  europa: 0.1,
+  ganymede: 0.33,
+  callisto: 0.0,
+  titan: 0.3,
+  enceladus: 0.0,
+  miranda: 0.0,
+  ariel: 0.0,
+  umbriel: 0.0,
+  titania: 0.0,
+  
+  // 矮行星
+  ceres: 4.0,
+  eris: 78.0,        // 高倾角
+  haumea: 126.0,     // 逆行
+  makemake: 0.0,     // 未知，假设为 0
+};
+
+
+/**
+ * ==================== 行星贴图系统配置 ====================
+ * 
+ * 行星表面贴图（Base Color / Albedo）配置
+ * 
+ * CRITICAL: 此配置仅用于 Render Layer，不影响 Physical Layer 计算
+ * - 贴图不参与物理计算
+ * - 贴图尺寸不影响碰撞/拾取半径
+ * - BodyId 必须与 Physical Layer 定义一致（小写）
+ */
+
+/**
+ * ==================== 贴图策略约束（Phase 1 锁定） ====================
+ * 
+ * ⚠️ LOCKED: 以下约束在 Phase 1 期间不可更改
+ * 
+ * 这些约束是系统稳定性的"护城河"，防止后续开发破坏系统边界。
+ * 任何修改必须经过完整的设计评审。
+ */
+export const TEXTURE_STRATEGY_CONSTRAINTS = {
+  /**
+   * ✅ 允许的贴图类型
+   * Phase 1 仅支持 BaseColor（Albedo）贴图
+   */
+  ALLOWED_TEXTURE_TYPES: ['baseColor'] as const,
+  
+  /**
+   * ✅ 允许的分辨率
+   * Low (2K) 和 High (4K) 两档，不支持 8K
+   */
+  ALLOWED_RESOLUTIONS: ['2k', '4k'] as const,
+  
+  /**
+   * ❌ 明确禁止的功能（Phase 1）
+   * 这些功能在 Phase 1 期间绝对不实现
+   */
+  FORBIDDEN_FEATURES: [
+    '8k_textures',      // 8K 分辨率 - 内存开销过大
+    'normal_maps',      // 法线贴图 - 增加复杂度
+    'height_maps',      // 高程贴图 - 增加复杂度
+    'cloud_layers',     // 云层动画 - 增加复杂度
+    'specular_maps',    // 高光贴图 - 增加复杂度
+    'night_lights',     // 夜面灯光 - 增加复杂度
+    'auto_download',    // 自动下载贴图 - 网络依赖
+    'svg_textures',     // SVG/矢量贴图 - 不适用
+    'terrain_detail',   // 地形细节 - 超出范围
+  ] as const,
+  
+  /**
+   * ✅ Sun 永远 emissive-only
+   * Sun 在 Phase 1 期间不使用任何贴图
+   */
+  SUN_EMISSIVE_ONLY: true,
+  
+  /**
+   * ✅ 默认分辨率
+   * 使用 2K 以优化内存
+   */
+  DEFAULT_RESOLUTION: '2k' as const,
+  
+  /**
+   * Phase 1 版本标识
+   */
+  PHASE: 1,
+  VERSION: '3.1.0',
+} as const;
+
+/**
+ * 行星贴图配置接口
+ * 
+ * 支持多层贴图（为未来扩展预留）：
+ * - baseColor: 基础颜色贴图（Albedo）- Phase 1 实现
+ * - normalMap: 法线贴图 - 预留
+ * - cloudMap: 云层贴图 - 预留
+ * - nightMap: 夜面灯光贴图 - 预留
+ */
+export interface PlanetTextureConfig {
+  /** Base color / albedo map path (equirectangular projection) */
+  baseColor?: string;
+  
+  /** Reserved for future: normal map */
+  normalMap?: string;
+  
+  /** Reserved for future: cloud layer */
+  cloudMap?: string;
+  
+  /** Reserved for future: night lights */
+  nightMap?: string;
+}
+
+/**
+ * 行星贴图映射配置
+ * 
+ * BodyId → 贴图路径映射
+ * 
+ * 注意：
+ * - BodyId 必须与 Physical Layer 定义一致（小写）
+ * - Sun 不配置贴图（Phase 1 保持 emissive-only）
+ * - 使用 2K 分辨率以优化内存
+ * - 贴图格式：Equirectangular projection（等距圆柱投影）
+ */
+export const PLANET_TEXTURE_CONFIG: Record<string, PlanetTextureConfig> = {
+  // Sun: NO texture in Phase 1 (emissive-only)
+  // sun: undefined,
+  
+  // 八大行星
+  mercury: {
+    baseColor: '/textures/planets/2k_mercury.jpg',
+  },
+  venus: {
+    baseColor: '/textures/planets/2k_venus_surface.jpg',
+  },
+  earth: {
+    baseColor: '/textures/planets/2k_earth_daymap.jpg',
+  },
+  mars: {
+    baseColor: '/textures/planets/2k_mars.jpg',
+  },
+  jupiter: {
+    baseColor: '/textures/planets/2k_jupiter.jpg',
+  },
+  saturn: {
+    baseColor: '/textures/planets/2k_saturn.jpg',
+  },
+  uranus: {
+    baseColor: '/textures/planets/2k_uranus.jpg',
+  },
+  neptune: {
+    baseColor: '/textures/planets/2k_neptune.jpg',
+  },
+  
+  // 卫星
+  moon: {
+    baseColor: '/textures/planets/2k_moon.jpg',
+  },
+  
+  // 矮行星（虚构贴图）
+  ceres: {
+    baseColor: '/textures/planets/2k_ceres_fictional.jpg',
+  },
+  eris: {
+    baseColor: '/textures/planets/2k_eris_fictional.jpg',
+  },
+  haumea: {
+    baseColor: '/textures/planets/2k_haumea_fictional.jpg',
+  },
+  makemake: {
+    baseColor: '/textures/planets/2k_makemake_fictional.jpg',
+  },
+};
+
+/**
+ * TextureManager 配置
+ * 
+ * 控制贴图加载行为
+ */
+export const TEXTURE_MANAGER_CONFIG = {
+  /** 是否启用贴图加载（可用于测试时禁用） */
+  enabled: true,
+  
+  /** 默认贴图分辨率后缀（用于内存优化） */
+  defaultResolution: '2k',
+  
+  /** 是否在控制台输出贴图加载日志 */
+  debugLogging: false,
+  
+  /** 贴图加载超时时间（毫秒） */
+  loadTimeout: 30000,
+};

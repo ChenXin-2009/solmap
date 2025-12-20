@@ -36,6 +36,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRe
 import ScaleRuler from './ScaleRuler';
 import SettingsMenu from '@/components/SettingsMenu';
 import { ORBIT_COLORS, SUN_LIGHT_CONFIG, ORBIT_CURVE_POINTS, SATELLITE_CONFIG } from '@/lib/config/visualConfig';
+import { TextureManager } from '@/lib/3d/TextureManager';
 
 // ==================== 可调参数配置 ====================
 // ⚙️ 以下参数可在文件顶部调整，影响 3D 场景显示效果
@@ -330,6 +331,14 @@ export default function SolarSystemCanvas3D() {
         (planetMesh as any).userData.radius = planet.getRealRadius();
         planetsRef.current.set(body.name.toLowerCase(), planet);
 
+        // 异步加载并应用贴图（Render Layer only - 不影响物理计算）
+        const textureManager = TextureManager.getInstance();
+        textureManager.getTexture(bodyKey).then((texture) => {
+          if (texture && !planet.getIsSun()) {
+            planet.applyTexture(texture, bodyKey);
+          }
+        });
+
         // 创建标记圈（2D）
         planet.createMarkerCircle(CSS2DObject);
 
@@ -416,6 +425,18 @@ export default function SolarSystemCanvas3D() {
             // 更新星球自转 - 使用当前时间和时间速度
             const currentTimeInDays = dateToJulianDay(currentState.currentTime) - 2451545.0; // Days since J2000.0
             planet.updateRotation(currentTimeInDays, currentState.timeSpeed);
+            
+            // 更新潮汐锁定卫星的朝向（始终面向母行星）
+            if (planet.getIsTidallyLocked()) {
+              const parentName = planet.getParentBodyName();
+              if (parentName) {
+                const parentBody = currentBodies.find((b: any) => b.name.toLowerCase() === parentName.toLowerCase());
+                if (parentBody) {
+                  const parentPosition = new THREE.Vector3(parentBody.x, parentBody.y, parentBody.z);
+                  planet.updateTidalLocking(parentPosition);
+                }
+              }
+            }
             
             // 计算相机到星球的距离并更新 LOD
             const planetWorldPos = new THREE.Vector3(body.x, body.y, body.z);
@@ -1051,7 +1072,15 @@ export default function SolarSystemCanvas3D() {
         resizeObserver.disconnect();
 
         // 清理资源
-        planetsRef.current.forEach((planet) => planet.dispose());
+        // 释放贴图引用（TextureManager 管理实际 GPU 资源）
+        const textureManager = TextureManager.getInstance();
+        planetsRef.current.forEach((planet) => {
+          const bodyId = planet.getTextureBodyId();
+          if (bodyId) {
+            textureManager.releaseTexture(bodyId);
+          }
+          planet.dispose();
+        });
         orbitsRef.current.forEach((orbit) => orbit.dispose());
         
         // 清理标签（从场景中移除）

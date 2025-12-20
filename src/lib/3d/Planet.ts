@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import type { CelestialBody } from '@/lib/astronomy/orbit';
 import { CelestialBodyConfig, rotationPeriodToSpeed } from '@/lib/types/celestialTypes';
-import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS, PLANET_LOD_CONFIG, PLANET_GRID_CONFIG } from '@/lib/config/visualConfig';
+import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS, PLANET_LOD_CONFIG, PLANET_GRID_CONFIG, PLANET_AXIAL_TILT } from '@/lib/config/visualConfig';
 
 // 真实行星半径（AU单位）
 // 1 AU = 149,597,870 km
@@ -67,6 +67,21 @@ export class Planet {
   // Rotation tracking for pause/resume functionality
   private lastUpdateTime: number = 0; // Last time updateRotation was called
   private accumulatedRotation: number = 0; // Accumulated rotation from previous updates
+  
+  /**
+   * 获取累积旋转角度（用于测试和调试）
+   */
+  getAccumulatedRotation(): number {
+    return this.accumulatedRotation;
+  }
+  
+  // Texture support (Render Layer only - does not affect physics)
+  private textureLoaded: boolean = false; // 是否已应用贴图
+  private textureBodyId: string | null = null; // 贴图对应的 BodyId（用于引用跟踪）
+  private planetName: string = ''; // 行星名称（用于贴图查找）
+  private axialTilt: number = 0; // 轴倾角（弧度）
+  private isTidallyLocked: boolean = false; // 是否潮汐锁定
+  private parentBodyName: string | null = null; // 母行星名称（用于潮汐锁定）
 
   constructor(config: PlanetConfig) {
     // Handle both old PlanetConfig (with body) and new CelestialBodyConfig (direct properties)
@@ -104,6 +119,15 @@ export class Planet {
     
     this.isSun = bodyInfo.isSun || false;
     
+    // 保存行星名称（用于贴图查找）
+    this.planetName = bodyInfo.name.toLowerCase();
+    
+    // 检查是否为潮汐锁定的卫星
+    if (celestialConfig?.isSatellite && celestialConfig?.parentBody) {
+      this.isTidallyLocked = true;
+      this.parentBodyName = celestialConfig.parentBody;
+    }
+    
     // 使用真实行星半径（AU单位）
     const planetName = bodyInfo.name.toLowerCase();
     this.realRadius = REAL_PLANET_RADII[planetName] || bodyInfo.radius;
@@ -125,6 +149,19 @@ export class Planet {
 
     // 创建网格
     this.mesh = new THREE.Mesh(this.geometry, this.material);
+    
+    // 应用轴倾角（相对于黄道面）
+    // 在我们的坐标系中：Y 轴向上（黄道面法线），XZ 是黄道面
+    // 地球的轴倾角 23.44° 表示北极向北黄极方向倾斜
+    // 北黄极在黄道坐标系中位于 +Z 方向（大约）
+    // 使用绕 X 轴旋转，使北极向 +Z 方向倾斜
+    // 这样在春分/秋分时，南北极会位于晨昏线上
+    const tiltDegrees = PLANET_AXIAL_TILT[this.planetName] ?? 0;
+    this.axialTilt = THREE.MathUtils.degToRad(tiltDegrees);
+    // 初始轴倾角设置（使用四元数，后续在 updateRotation 中会重新设置）
+    const initialTiltQuaternion = new THREE.Quaternion();
+    initialTiltQuaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.axialTilt);
+    this.mesh.quaternion.copy(initialTiltQuaternion);
     
     // 如果是太阳，创建光晕效果（使用屏幕空间 Sprite 替代嵌套球体）
     if (this.isSun && SUN_GLOW_CONFIG.enabled) {
@@ -433,8 +470,24 @@ export class Planet {
    * 更新星球自转
    * @param currentTime 当前时间（天）
    * @param timeSpeed 时间速度倍数
+   * 
+   * 自转实现说明：
+   * 1. 轴倾角（axialTilt）定义了自转轴相对于黄道面法线的倾斜角度
+   * 2. 自转应该绕着倾斜后的自转轴进行，而不是绕世界坐标系的 Y 轴
+   * 3. 使用四元数来正确组合轴倾角和自转
+   * 
+   * 坐标系约定：
+   * - Y 轴向上（黄道面法线方向）
+   * - XZ 平面是黄道面
+   * - 北极默认指向 +Y，轴倾角使其向 +Z 方向倾斜
    */
   updateRotation(currentTime: number, timeSpeed: number = 1): void {
+    // 潮汐锁定的卫星不使用常规自转，而是通过 updateTidalLocking 方法更新朝向
+    if (this.isTidallyLocked) {
+      this.lastUpdateTime = currentTime;
+      return;
+    }
+    
     if (this.rotationSpeed === 0) {
       this.lastUpdateTime = currentTime;
       return;
@@ -455,14 +508,89 @@ export class Planet {
     // Accumulate rotation
     this.accumulatedRotation += deltaRotation;
     
-    // Apply rotation to the mesh
-    this.mesh.rotation.y = this.accumulatedRotation;
+    // 使用四元数正确组合轴倾角和自转
+    // 步骤：
+    // 1. 创建轴倾角四元数：绕 X 轴旋转，使北极向 +Z 方向倾斜
+    // 2. 创建自转四元数：绕 Y 轴（本地坐标系）旋转
+    // 3. 组合：先应用轴倾角，再应用自转（自转是绕倾斜后的轴）
+    
+    const tiltQuaternion = new THREE.Quaternion();
+    tiltQuaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.axialTilt);
+    
+    const spinQuaternion = new THREE.Quaternion();
+    spinQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.accumulatedRotation);
+    
+    // 组合四元数：先倾斜，再自转（注意顺序：tilt * spin）
+    // 这样自转是绕着倾斜后的本地 Y 轴进行的
+    const finalQuaternion = new THREE.Quaternion();
+    finalQuaternion.multiplyQuaternions(tiltQuaternion, spinQuaternion);
+    
+    this.mesh.quaternion.copy(finalQuaternion);
     
     // Update last update time
     this.lastUpdateTime = currentTime;
     
     // Since the grid is a child of the mesh, it will automatically rotate with the planet
     // This creates the visual effect of the latitude/longitude lines rotating with the planet
+  }
+
+  /**
+   * 更新潮汐锁定卫星的朝向
+   * 潮汐锁定的卫星始终以同一面朝向母行星
+   * 
+   * 实现说明：
+   * 1. 计算从卫星指向母行星的方向向量
+   * 2. 使用 lookAt 的原理，但需要考虑轴倾角
+   * 3. 卫星的 +Z 方向（前方）应该指向母行星
+   * 4. 同时保持轴倾角的影响
+   * 
+   * @param parentPosition - 母行星的世界坐标位置
+   */
+  updateTidalLocking(parentPosition: THREE.Vector3): void {
+    if (!this.isTidallyLocked) return;
+    
+    // 获取卫星当前位置
+    const satellitePosition = this.mesh.position.clone();
+    
+    // 计算从卫星指向母行星的方向向量（在 XZ 平面上）
+    const directionToParent = new THREE.Vector3()
+      .subVectors(parentPosition, satellitePosition);
+    
+    // 计算卫星应该面向的角度（绕 Y 轴）
+    // atan2 返回从正 Z 轴到方向向量的角度
+    const targetRotationY = Math.atan2(directionToParent.x, directionToParent.z);
+    
+    // 使用四元数正确组合轴倾角和朝向
+    // 步骤：
+    // 1. 创建轴倾角四元数：绕 X 轴旋转
+    // 2. 创建朝向四元数：绕 Y 轴旋转使卫星面向母行星
+    // 3. 组合：先应用轴倾角，再应用朝向
+    
+    const tiltQuaternion = new THREE.Quaternion();
+    tiltQuaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.axialTilt);
+    
+    const facingQuaternion = new THREE.Quaternion();
+    facingQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetRotationY);
+    
+    // 组合四元数：先倾斜，再朝向
+    const finalQuaternion = new THREE.Quaternion();
+    finalQuaternion.multiplyQuaternions(tiltQuaternion, facingQuaternion);
+    
+    this.mesh.quaternion.copy(finalQuaternion);
+  }
+
+  /**
+   * 检查是否为潮汐锁定的卫星
+   */
+  getIsTidallyLocked(): boolean {
+    return this.isTidallyLocked;
+  }
+
+  /**
+   * 获取母行星名称（用于潮汐锁定）
+   */
+  getParentBodyName(): string | null {
+    return this.parentBodyName;
   }
 
   /**
@@ -577,7 +705,70 @@ export class Planet {
     return this.realRadius;
   }
 
+  /**
+   * 获取行星名称（用于贴图查找）
+   */
+  getPlanetName(): string {
+    return this.planetName;
+  }
+
+  /**
+   * 检查是否为太阳
+   */
+  getIsSun(): boolean {
+    return this.isSun;
+  }
+
+  /**
+   * 应用贴图到行星材质
+   * 
+   * CRITICAL: 
+   * - Sun 排除：永远不对太阳应用贴图（保持 emissive-only）
+   * - 贴图仅用于渲染，不影响物理计算
+   * - 应用贴图时将材质颜色设为白色，避免颜色叠加
+   * 
+   * @param texture - THREE.Texture 实例（或 null 表示回退到纯色）
+   * @param bodyId - 天体 ID（用于引用跟踪）
+   */
+  applyTexture(texture: THREE.Texture | null, bodyId: string): void {
+    // Sun 排除：永远不对太阳应用贴图
+    if (this.isSun) {
+      return;
+    }
+    
+    if (texture) {
+      this.material.map = texture;
+      // 将材质颜色设为白色，避免与贴图颜色叠加
+      this.material.color.setHex(0xffffff);
+      this.material.needsUpdate = true;
+      this.textureLoaded = true;
+      this.textureBodyId = bodyId;
+    }
+  }
+
+  /**
+   * 检查是否已应用贴图
+   */
+  hasTextureApplied(): boolean {
+    return this.textureLoaded;
+  }
+
+  /**
+   * 获取贴图对应的 BodyId（用于释放引用）
+   */
+  getTextureBodyId(): string | null {
+    return this.textureBodyId;
+  }
+
   dispose(): void {
+    // 清除贴图引用（实际 GPU 资源由 TextureManager 管理）
+    if (this.textureBodyId) {
+      // 注意：TextureManager.releaseTexture 由外部调用
+      this.material.map = null;
+      this.textureBodyId = null;
+      this.textureLoaded = false;
+    }
+    
     if (this.markerObject && this.markerObject.parent) {
       this.markerObject.parent.remove(this.markerObject);
     }
