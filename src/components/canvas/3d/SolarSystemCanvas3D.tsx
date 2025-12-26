@@ -252,9 +252,10 @@ export default function SolarSystemCanvas3D() {
       }
       scene.add(sunLight);
       
-      // 添加环境光，使行星更清晰可见
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
-      scene.add(ambientLight);
+      // 移除环境光 - 使用自定义着色器实现真实光照
+      // 环境光会导致背阳面也被照亮，不符合真实物理效果
+      // const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+      // scene.add(ambientLight);
 
       // 初始化行星和轨道
       // 从 store 获取初始值，而不是订阅它们
@@ -338,6 +339,13 @@ export default function SolarSystemCanvas3D() {
             planet.applyTexture(texture, bodyKey);
           }
         });
+        
+        // 加载夜间贴图（用于昼夜渐变效果）
+        textureManager.getNightTexture(bodyKey).then((nightTexture) => {
+          if (nightTexture) {
+            planet.applyNightTexture(nightTexture);
+          }
+        });
 
         // 创建标记圈（2D）
         planet.createMarkerCircle(CSS2DObject);
@@ -415,12 +423,18 @@ export default function SolarSystemCanvas3D() {
         const currentState = useSolarSystemStore.getState();
         const currentBodies = currentState.celestialBodies;
 
+        // 太阳位置（用于光照计算）
+        const sunPosition = new THREE.Vector3(0, 0, 0);
+        
         // 更新行星位置、自转和 LOD
         currentBodies.forEach((body: any) => {
           const key = body.name.toLowerCase();
           const planet = planetsRef.current.get(key);
           if (planet) {
             planet.updatePosition(body.x, body.y, body.z);
+            
+            // 更新太阳位置（用于光照计算）
+            planet.updateSunPosition(sunPosition);
             
             // 更新星球自转 - 使用当前时间和时间速度
             const currentTimeInDays = dateToJulianDay(currentState.currentTime) - 2451545.0; // Days since J2000.0
@@ -1152,7 +1166,9 @@ export default function SolarSystemCanvas3D() {
       />
       {/* 设置菜单（仅在 3D 模式下显示） */}
       {isCameraControllerReady && cameraControllerRef.current && (
-        <SettingsMenu cameraController={cameraControllerRef.current} />
+        <SettingsMenu 
+          cameraController={cameraControllerRef.current} 
+        />
       )}
     </div>
   );

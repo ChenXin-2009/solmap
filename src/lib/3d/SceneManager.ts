@@ -30,6 +30,7 @@ export class SceneManager {
       antialias: true,
       powerPreference: 'high-performance',
       logarithmicDepthBuffer: true, // 防止深度闪烁（太阳系尺度很大）
+      alpha: false, // 禁用 alpha 通道，确保背景不透明
     });
 
     // 物理光照（某些版本可能不支持，使用可选链）
@@ -101,11 +102,15 @@ export class SceneManager {
       color: 0xffffff,
       size: 1,
       sizeAttenuation: false, // 星星大小不随距离变化
-      transparent: true,
-      opacity: 0.8,
+      transparent: false, // 不透明
+      depthWrite: false, // 不写入深度缓冲（星空始终在最后面）
+      depthTest: false, // 不进行深度测试（星空始终可见，但会被其他物体遮挡）
     });
     
     const starfield = new THREE.Points(geometry, material);
+    
+    // 设置渲染顺序：负数表示先渲染（在最后面）
+    starfield.renderOrder = -1000;
     
     // 将星空添加到场景，但使用特殊的渲染方式
     // 在动画循环中，我们需要将星空位置更新为相机位置

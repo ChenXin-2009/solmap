@@ -412,8 +412,8 @@ describe('Texture System Property Tests (Phase 1)', () => {
       expect(TEXTURE_STRATEGY_CONSTRAINTS.FORBIDDEN_FEATURES).toContain('normal_maps');
     });
 
-    it('should forbid cloud layers', () => {
-      expect(TEXTURE_STRATEGY_CONSTRAINTS.FORBIDDEN_FEATURES).toContain('cloud_layers');
+    it('should implement night lights', () => {
+      expect(TEXTURE_STRATEGY_CONSTRAINTS.IMPLEMENTED_FEATURES).toContain('night_lights');
     });
   });
 });

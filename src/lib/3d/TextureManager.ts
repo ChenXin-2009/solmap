@@ -136,6 +136,61 @@ export class TextureManager {
   }
 
   /**
+   * 获取 BodyId 对应的夜间贴图路径
+   * 
+   * @param bodyId - 天体 ID
+   * @returns 夜间贴图路径或 null（无配置）
+   */
+  private getNightTexturePath(bodyId: string): string | null {
+    const normalized = normalizeBodyId(bodyId);
+    const config = PLANET_TEXTURE_CONFIG[normalized];
+    return config?.nightMap ?? null;
+  }
+
+  /**
+   * 异步获取天体夜间贴图
+   * 
+   * @param bodyId - 天体 ID
+   * @returns Promise 解析为 THREE.Texture 或 null
+   */
+  public async getNightTexture(bodyId: string): Promise<THREE.Texture | null> {
+    if (this.disposed) {
+      this.log('warn', 'TextureManager is disposed, cannot get night texture');
+      return null;
+    }
+    
+    if (!TEXTURE_MANAGER_CONFIG.enabled) {
+      return null;
+    }
+    
+    const path = this.getNightTexturePath(bodyId);
+    if (!path) {
+      // 无夜间贴图配置
+      return null;
+    }
+    
+    // 检查缓存
+    const cached = this.cache.get(path);
+    if (cached) {
+      cached.refCount++;
+      
+      if (cached.state === TextureLoadState.LOADED) {
+        return cached.texture;
+      }
+      
+      if (cached.state === TextureLoadState.FAILED) {
+        return null;
+      }
+      
+      if (cached.state === TextureLoadState.LOADING && cached.loadPromise) {
+        return cached.loadPromise;
+      }
+    }
+    
+    return this.loadTexture(path);
+  }
+
+  /**
    * 异步获取天体贴图
    * 
    * @param bodyId - 天体 ID（必须来自 Physical Layer StateVector/BodyHierarchy）

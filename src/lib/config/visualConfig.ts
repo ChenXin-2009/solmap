@@ -239,15 +239,18 @@ export const HEADER_CONFIG = {
   // 浮动 Header 样式（可选）
   floatingStyle: {
     transitionDuration: 180,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
-    hoverBackgroundColor: 'rgba(0, 0, 0, 0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 8,
-    padding: 8,
-    boxShadow: '0 6px 18px rgba(0,0,0,0.6)',
-    backdropFilter: 'blur(6px)',
+    backgroundColor: 'transparent',
+    hoverBackgroundColor: 'transparent',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    borderRadius: 0,
+    padding: 0,
+    boxShadow: 'none',
+    backdropFilter: 'none',
   },
+  
+  // Logo 透明度（0-1）
+  logoOpacity: 0.6,
   
   // Header背景颜色（CSS颜色值）
   backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -569,12 +572,18 @@ export const TEXTURE_STRATEGY_CONSTRAINTS = {
     '8k_textures',      // 8K 分辨率 - 内存开销过大
     'normal_maps',      // 法线贴图 - 增加复杂度
     'height_maps',      // 高程贴图 - 增加复杂度
-    'cloud_layers',     // 云层动画 - 增加复杂度
     'specular_maps',    // 高光贴图 - 增加复杂度
-    'night_lights',     // 夜面灯光 - 增加复杂度
     'auto_download',    // 自动下载贴图 - 网络依赖
     'svg_textures',     // SVG/矢量贴图 - 不适用
     'terrain_detail',   // 地形细节 - 超出范围
+  ] as const,
+  
+  /**
+   * ✅ 已实现的功能（Phase 1）
+   * 这些功能已在当前版本中实现
+   */
+  IMPLEMENTED_FEATURES: [
+    'night_lights',     // 夜面灯光 - 已实现（地球）
   ] as const,
   
   /**
@@ -599,11 +608,10 @@ export const TEXTURE_STRATEGY_CONSTRAINTS = {
 /**
  * 行星贴图配置接口
  * 
- * 支持多层贴图（为未来扩展预留）：
- * - baseColor: 基础颜色贴图（Albedo）- Phase 1 实现
+ * 支持多层贴图：
+ * - baseColor: 基础颜色贴图（Albedo）- ✅ 已实现
+ * - nightMap: 夜面灯光贴图 - ✅ 已实现（地球）
  * - normalMap: 法线贴图 - 预留
- * - cloudMap: 云层贴图 - 预留
- * - nightMap: 夜面灯光贴图 - 预留
  */
 export interface PlanetTextureConfig {
   /** Base color / albedo map path (equirectangular projection) */
@@ -611,9 +619,6 @@ export interface PlanetTextureConfig {
   
   /** Reserved for future: normal map */
   normalMap?: string;
-  
-  /** Reserved for future: cloud layer */
-  cloudMap?: string;
   
   /** Reserved for future: night lights */
   nightMap?: string;
@@ -643,6 +648,7 @@ export const PLANET_TEXTURE_CONFIG: Record<string, PlanetTextureConfig> = {
   },
   earth: {
     baseColor: '/textures/planets/2k_earth_daymap.jpg',
+    nightMap: '/textures/planets/2k_earth_nightmap.jpg',
   },
   mars: {
     baseColor: '/textures/planets/2k_mars.jpg',
@@ -697,4 +703,467 @@ export const TEXTURE_MANAGER_CONFIG = {
   
   /** 贴图加载超时时间（毫秒） */
   loadTimeout: 30000,
+};
+
+/**
+ * 行星光照配置
+ * 控制行星表面的光照效果
+ */
+export const PLANET_LIGHTING_CONFIG = {
+  // ==================== 基础光照参数 ====================
+  
+  // 环境光强度（用于照亮背面，模拟大气散射和反射光）
+  // 范围：0-1，0 = 完全黑暗的夜面，1 = 与白天一样亮
+  // 建议：0.05-0.2
+  ambientIntensity: 0.08,
+  
+  // 昼夜过渡区域宽度（弧度）
+  // 控制明暗交界处的渐变宽度，值越大过渡越平滑
+  // 范围：0.05-0.5，0.1 ≈ 5.7° 的过渡带
+  // 建议：0.1-0.25
+  terminatorWidth: 0.15,
+  
+  // ==================== 对比度和亮度参数 ====================
+  
+  // 向阳面的最大亮度（防止过曝）
+  // 范围：0.5-2.0，1.0 = 原始贴图亮度
+  // 建议：0.9-1.2
+  maxDaylightIntensity: 1.1,
+  
+  // 背阳面的最小亮度
+  // 范围：0-0.2，0 = 完全黑暗
+  // 建议：0.01-0.05
+  minNightIntensity: 0.02,
+  
+  // 对比度增强系数
+  // 范围：0.5-2.0，1.0 = 无变化，>1 = 增加对比度
+  // 建议：1.0-1.5
+  contrastBoost: 1.1,
+  
+  // 饱和度增强系数
+  // 范围：0-2.0，1.0 = 无变化，>1 = 增加饱和度
+  // 建议：0.8-1.3
+  saturationBoost: 1.1,
+  
+  // 伽马校正值
+  // 范围：0.5-2.5，1.0 = 无校正，<1 = 变亮，>1 = 变暗
+  // 建议：0.9-1.2
+  gamma: 1.0,
+  
+  // ==================== 地球夜间贴图参数 ====================
+  
+  // 是否启用地球夜间贴图
+  enableEarthNightMap: true,
+  
+  // 夜间贴图的最大亮度（0-1）
+  // 控制城市灯光的亮度
+  // 建议：0.5-1.5
+  nightMapIntensity: 1.2,
+  
+  // ==================== 边缘光照参数（菲涅尔效果） ====================
+  
+  // 是否启用边缘光照（模拟大气散射）
+  enableFresnelEffect: true,
+  
+  // 边缘光照强度
+  // 范围：0-1，0 = 无边缘光
+  // 建议：0.1-0.4
+  fresnelIntensity: 0.15,
+  
+  // 边缘光照颜色（十六进制）
+  fresnelColor: 0x88ccff,
+  
+  // 边缘光照指数（控制边缘光的锐利程度）
+  // 范围：1-10，值越大边缘越锐利
+  // 建议：2-5
+  fresnelPower: 3.0,
+  
+  // ==================== 极点修复参数 ====================
+  
+  // 极点混合开始距离（0-1，基于 Y 坐标）
+  // 值越小，混合区域越大
+  poleBlendStart: 0.9,
+  
+  // 极点混合结束距离
+  poleBlendEnd: 0.99,
+  
+  // 极点采样数量（用于消除条纹）
+  poleSampleCount: 8,
+  
+  // 极点采样半径（UV 空间）
+  poleSampleRadius: 0.02,
+};
+
+/**
+ * 天体材质参数接口
+ * 每个天体可以覆盖 PLANET_LIGHTING_CONFIG 中的任意参数
+ */
+export interface CelestialMaterialParams {
+  ambientIntensity?: number;
+  terminatorWidth?: number;
+  maxDaylightIntensity?: number;
+  minNightIntensity?: number;
+  contrastBoost?: number;
+  saturationBoost?: number;
+  gamma?: number;
+  nightMapIntensity?: number;
+  enableFresnelEffect?: boolean;
+  fresnelIntensity?: number;
+  fresnelColor?: number;
+  fresnelPower?: number;
+}
+
+/**
+ * 每个天体的独立材质参数
+ * 
+ * 设计原则：
+ * - 岩石天体：高对比、低饱和、弱边缘光
+ * - 气态巨行星：低对比、高饱和、强终止线过渡
+ * - 有大气的岩石行星：柔和 terminator + 边缘光
+ * - 冰质天体：高 gamma + 高 fresnel + 偏冷色
+ * - 卫星：比母星"更硬、更干、更无大气"
+ * 
+ * 未列出的参数使用 PLANET_LIGHTING_CONFIG 默认值
+ */
+export const CELESTIAL_MATERIAL_PARAMS: Record<string, CelestialMaterialParams> = {
+  // ==================== 岩石行星 ====================
+  
+  // Mercury - 极端岩石，无大气，硬阴影
+  mercury: {
+    ambientIntensity: 0.02,
+    terminatorWidth: 0.06,
+    contrastBoost: 1.6,
+    saturationBoost: 0.9,
+    gamma: 0.9,
+    enableFresnelEffect: false,
+  },
+  
+  // Venus - 厚大气，朦胧，对比低
+  venus: {
+    ambientIntensity: 0.18,
+    terminatorWidth: 0.3,
+    contrastBoost: 1.0,
+    saturationBoost: 1.1,
+    gamma: 1.15,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.3,
+    fresnelColor: 0xffddaa,
+    fresnelPower: 2.0,
+  },
+  
+  // Earth - 有大气、有水，柔和真实
+  earth: {
+    ambientIntensity: 0.12,
+    terminatorWidth: 0.22,
+    contrastBoost: 1.15,
+    saturationBoost: 1.15,
+    gamma: 1.05,
+    nightMapIntensity: 1.3,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.22,
+    fresnelColor: 0x88ccff,
+    fresnelPower: 2.5,
+  },
+  
+  // Mars - 稀薄大气，红色调
+  mars: {
+    ambientIntensity: 0.07,
+    terminatorWidth: 0.14,
+    contrastBoost: 1.35,
+    saturationBoost: 1.2,
+    gamma: 1.0,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.1,
+    fresnelColor: 0xffaa88,
+    fresnelPower: 3.0,
+  },
+  
+  // ==================== 气态巨行星 ====================
+  
+  // Jupiter - 气态巨行星，条纹明显
+  jupiter: {
+    ambientIntensity: 0.15,
+    terminatorWidth: 0.35,
+    contrastBoost: 1.0,
+    saturationBoost: 1.25,
+    gamma: 1.1,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.18,
+    fresnelColor: 0xffeedd,
+    fresnelPower: 2.0,
+  },
+  
+  // Saturn - 气态巨行星，柔和
+  saturn: {
+    ambientIntensity: 0.14,
+    terminatorWidth: 0.33,
+    contrastBoost: 1.0,
+    saturationBoost: 1.15,
+    gamma: 1.1,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.2,
+    fresnelColor: 0xffeedd,
+    fresnelPower: 2.0,
+  },
+  
+  // ==================== 冰巨星 ====================
+  
+  // Uranus - 冰巨星，偏冷色
+  uranus: {
+    ambientIntensity: 0.16,
+    terminatorWidth: 0.32,
+    contrastBoost: 1.0,
+    saturationBoost: 1.3,
+    gamma: 1.15,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.25,
+    fresnelColor: 0x99ddff,
+    fresnelPower: 2.5,
+  },
+  
+  // Neptune - 冰巨星，深蓝
+  neptune: {
+    ambientIntensity: 0.16,
+    terminatorWidth: 0.32,
+    contrastBoost: 1.0,
+    saturationBoost: 1.3,
+    gamma: 1.15,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.25,
+    fresnelColor: 0x99ddff,
+    fresnelPower: 2.5,
+  },
+  
+  // ==================== 卫星 ====================
+  
+  // Moon - 干燥岩石卫星，硬阴影，无大气
+  moon: {
+    ambientIntensity: 0.03,
+    terminatorWidth: 0.08,
+    contrastBoost: 1.45,
+    saturationBoost: 0.95,
+    gamma: 0.95,
+    enableFresnelEffect: false,
+  },
+  
+  // Io - 火山活跃，硫磺色
+  io: {
+    ambientIntensity: 0.04,
+    terminatorWidth: 0.1,
+    contrastBoost: 1.4,
+    saturationBoost: 1.1,
+    gamma: 0.95,
+    enableFresnelEffect: false,
+  },
+  
+  // Europa - 冰质卫星
+  europa: {
+    ambientIntensity: 0.1,
+    terminatorWidth: 0.18,
+    contrastBoost: 1.2,
+    saturationBoost: 0.9,
+    gamma: 1.2,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.3,
+    fresnelColor: 0xccffff,
+    fresnelPower: 3.0,
+  },
+  
+  // Ganymede - 岩石冰混合
+  ganymede: {
+    ambientIntensity: 0.06,
+    terminatorWidth: 0.12,
+    contrastBoost: 1.3,
+    saturationBoost: 0.95,
+    gamma: 1.0,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.15,
+    fresnelColor: 0xddddff,
+    fresnelPower: 3.0,
+  },
+  
+  // Callisto - 古老岩石冰
+  callisto: {
+    ambientIntensity: 0.05,
+    terminatorWidth: 0.1,
+    contrastBoost: 1.35,
+    saturationBoost: 0.9,
+    gamma: 1.0,
+    enableFresnelEffect: false,
+  },
+  
+  // Titan - 厚大气卫星
+  titan: {
+    ambientIntensity: 0.2,
+    terminatorWidth: 0.35,
+    contrastBoost: 1.0,
+    saturationBoost: 1.0,
+    gamma: 1.2,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.35,
+    fresnelColor: 0xffcc88,
+    fresnelPower: 2.0,
+  },
+  
+  // Enceladus - 冰质喷泉卫星
+  enceladus: {
+    ambientIntensity: 0.1,
+    terminatorWidth: 0.18,
+    contrastBoost: 1.2,
+    saturationBoost: 0.85,
+    gamma: 1.25,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.35,
+    fresnelColor: 0xccffff,
+    fresnelPower: 2.5,
+  },
+  
+  // Triton - 海王星逆行卫星，冰质
+  triton: {
+    ambientIntensity: 0.08,
+    terminatorWidth: 0.15,
+    contrastBoost: 1.25,
+    saturationBoost: 0.9,
+    gamma: 1.2,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.3,
+    fresnelColor: 0xaaddff,
+    fresnelPower: 3.0,
+  },
+  
+  // ==================== 矮行星 ====================
+  
+  // Ceres - 小行星带最大天体
+  ceres: {
+    ambientIntensity: 0.04,
+    terminatorWidth: 0.1,
+    contrastBoost: 1.4,
+    saturationBoost: 0.9,
+    gamma: 0.95,
+    enableFresnelEffect: false,
+  },
+  
+  // Pluto - 冰质矮行星
+  pluto: {
+    ambientIntensity: 0.06,
+    terminatorWidth: 0.12,
+    contrastBoost: 1.3,
+    saturationBoost: 0.95,
+    gamma: 1.15,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.2,
+    fresnelColor: 0xddccaa,
+    fresnelPower: 3.0,
+  },
+  
+  // Eris - 远日冰质矮行星
+  eris: {
+    ambientIntensity: 0.05,
+    terminatorWidth: 0.1,
+    contrastBoost: 1.35,
+    saturationBoost: 0.85,
+    gamma: 1.2,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.25,
+    fresnelColor: 0xccddff,
+    fresnelPower: 3.0,
+  },
+  
+  // Haumea - 快速自转椭球
+  haumea: {
+    ambientIntensity: 0.06,
+    terminatorWidth: 0.12,
+    contrastBoost: 1.3,
+    saturationBoost: 0.9,
+    gamma: 1.15,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.2,
+    fresnelColor: 0xddddff,
+    fresnelPower: 3.0,
+  },
+  
+  // Makemake - 红色冰质矮行星
+  makemake: {
+    ambientIntensity: 0.05,
+    terminatorWidth: 0.1,
+    contrastBoost: 1.35,
+    saturationBoost: 1.0,
+    gamma: 1.1,
+    enableFresnelEffect: true,
+    fresnelIntensity: 0.2,
+    fresnelColor: 0xffccaa,
+    fresnelPower: 3.0,
+  },
+};
+
+/**
+ * 获取天体的材质参数（合并默认值和天体特定值）
+ */
+export function getCelestialMaterialParams(bodyName: string): Required<CelestialMaterialParams> {
+  const defaults: Required<CelestialMaterialParams> = {
+    ambientIntensity: PLANET_LIGHTING_CONFIG.ambientIntensity,
+    terminatorWidth: PLANET_LIGHTING_CONFIG.terminatorWidth,
+    maxDaylightIntensity: PLANET_LIGHTING_CONFIG.maxDaylightIntensity,
+    minNightIntensity: PLANET_LIGHTING_CONFIG.minNightIntensity,
+    contrastBoost: PLANET_LIGHTING_CONFIG.contrastBoost,
+    saturationBoost: PLANET_LIGHTING_CONFIG.saturationBoost,
+    gamma: PLANET_LIGHTING_CONFIG.gamma,
+    nightMapIntensity: PLANET_LIGHTING_CONFIG.nightMapIntensity,
+    enableFresnelEffect: PLANET_LIGHTING_CONFIG.enableFresnelEffect,
+    fresnelIntensity: PLANET_LIGHTING_CONFIG.fresnelIntensity,
+    fresnelColor: PLANET_LIGHTING_CONFIG.fresnelColor,
+    fresnelPower: PLANET_LIGHTING_CONFIG.fresnelPower,
+  };
+  
+  const specific = CELESTIAL_MATERIAL_PARAMS[bodyName.toLowerCase()];
+  if (!specific) {
+    return defaults;
+  }
+  
+  return { ...defaults, ...specific };
+}
+
+/**
+ * 土星环配置
+ * 
+ * 土星环的几何和渲染参数
+ * 真实数据：
+ * - D环内边界: 66,900 km (1.11 Rs)
+ * - C环: 74,658 - 92,000 km
+ * - B环: 92,000 - 117,580 km
+ * - A环: 122,170 - 136,775 km (2.27 Rs)
+ * - F环: 140,180 km
+ * 
+ * Rs = 土星半径 ≈ 60,268 km
+ */
+export const SATURN_RING_CONFIG = {
+  /** 是否启用土星环 */
+  enabled: true,
+  
+  /** 环内半径（相对于土星半径的倍数） */
+  innerRadius: 1.2,
+  
+  /** 环外半径（相对于土星半径的倍数） */
+  outerRadius: 2.3,
+  
+  /** 环贴图路径（带 alpha 通道） */
+  texturePath: '/textures/planets/2k_saturn_ring_alpha.png',
+  
+  /** 环的不透明度 */
+  opacity: 0.9,
+  
+  /** 环的分段数（影响圆滑度） */
+  segments: 128,
+  
+  /** 环的倾斜角度（度）- 相对于土星赤道面，通常为 0 */
+  tiltAngle: 0,
+  
+  /** 环的颜色调整（用于无贴图时的回退） */
+  fallbackColor: 0xc4a66a,
+  
+  /** 环是否接收阴影（性能开销较大） */
+  receiveShadow: false,
+  
+  /** 环是否投射阴影（性能开销较大） */
+  castShadow: false,
 };

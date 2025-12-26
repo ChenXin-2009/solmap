@@ -160,11 +160,11 @@ export class OrbitCurve {
       
       material = new THREE.LineBasicMaterial({
         vertexColors: true,
-        transparent: true,
+        transparent: false, // 不透明，确保正确的深度测试
         opacity: 1.0,
-        depthWrite: false,
+        depthWrite: true,
         depthTest: true,
-        linewidth: 2, // Increased line width for better visibility
+        linewidth: 2,
       });
     } else {
       // 不使用渐变，使用固定透明度和颜色
@@ -173,11 +173,11 @@ export class OrbitCurve {
       const threeColor = new THREE.Color(colorToUse);
       material = new THREE.LineBasicMaterial({
         color: threeColor,
-        opacity: 0.8, // Increased opacity for better visibility
-        transparent: true,
-        depthWrite: false,
+        opacity: 1.0,
+        transparent: false, // 不透明，确保正确的深度测试
+        depthWrite: true,
         depthTest: true,
-        linewidth: 2, // Increased line width for better visibility
+        linewidth: 2,
       });
     }
 

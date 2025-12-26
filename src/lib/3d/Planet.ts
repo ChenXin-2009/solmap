@@ -2,7 +2,9 @@
  * Planet.ts - 3D 行星类
  * 
  * 功能：
- * - 创建和管理 3D 行星网格（SphereGeometry + MeshStandardMaterial）
+ * - 创建和管理 3D 行星网格（SphereGeometry + 自定义 Shader 材质）
+ * - 实现真实的太阳光照效果（向阳面亮，背阳面暗）
+ * - 支持地球昼夜贴图渐变（nightmap）
  * - 管理行星自转动画
  * - 创建标记圈（CSS2D，用于小行星的可视化）
  * - 为太阳添加光晕效果
@@ -16,7 +18,7 @@
 import * as THREE from 'three';
 import type { CelestialBody } from '@/lib/astronomy/orbit';
 import { CelestialBodyConfig, rotationPeriodToSpeed } from '@/lib/types/celestialTypes';
-import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS, PLANET_LOD_CONFIG, PLANET_GRID_CONFIG, PLANET_AXIAL_TILT } from '@/lib/config/visualConfig';
+import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS, PLANET_LOD_CONFIG, PLANET_GRID_CONFIG, PLANET_AXIAL_TILT, PLANET_LIGHTING_CONFIG, getCelestialMaterialParams, SATURN_RING_CONFIG } from '@/lib/config/visualConfig';
 
 // 真实行星半径（AU单位）
 // 1 AU = 149,597,870 km
@@ -49,7 +51,7 @@ export interface PlanetConfig {
 export class Planet {
   private mesh: THREE.Mesh;
   private geometry: THREE.SphereGeometry;
-  private material: THREE.MeshStandardMaterial;
+  private material: THREE.ShaderMaterial | THREE.MeshStandardMaterial;
   private rotationSpeed: number;
   private currentRotation: number = 0;
   private realRadius: number; // 真实半径（AU）
@@ -82,6 +84,17 @@ export class Planet {
   private axialTilt: number = 0; // 轴倾角（弧度）
   private isTidallyLocked: boolean = false; // 是否潮汐锁定
   private parentBodyName: string | null = null; // 母行星名称（用于潮汐锁定）
+  
+  // 夜间贴图支持（仅地球）
+  private nightTexture: THREE.Texture | null = null;
+  private hasNightMap: boolean = false;
+  
+  // 土星环支持
+  private ringMesh: THREE.Mesh | null = null;
+  private ringTexture: THREE.Texture | null = null;
+  
+  // 原始颜色（用于无贴图时的着色器）
+  private originalColor: THREE.Color;
 
   constructor(config: PlanetConfig) {
     // Handle both old PlanetConfig (with body) and new CelestialBodyConfig (direct properties)
@@ -107,6 +120,9 @@ export class Planet {
         isSun: false
       };
     }
+
+    // 保存原始颜色
+    this.originalColor = new THREE.Color(bodyInfo.color || 0xffffff);
     
     // Calculate rotation speed from rotation period if available
     if (celestialConfig?.rotationPeriod) {
@@ -141,26 +157,34 @@ export class Planet {
     this.geometry = new THREE.SphereGeometry(radius, this.currentSegments, this.currentSegments);
 
     // 创建材质
-    this.material = new THREE.MeshStandardMaterial({
-      color: bodyInfo.color || 0xffffff,
-      emissive: bodyInfo.isSun ? 0xffffaa : 0x000000, // 太阳使用更亮的黄色发光
-      emissiveIntensity: bodyInfo.isSun ? 2.0 : 0, // 增加太阳的发光强度
-    });
+    if (this.isSun) {
+      // 太阳使用标准材质（自发光）
+      this.material = new THREE.MeshStandardMaterial({
+        color: bodyInfo.color || 0xffffff,
+        emissive: 0xffffaa,
+        emissiveIntensity: 2.0,
+      });
+    } else {
+      // 行星使用自定义着色器材质（真实光照）
+      this.material = this.createPlanetShaderMaterial(bodyInfo.color || '#ffffff');
+    }
 
     // 创建网格
     this.mesh = new THREE.Mesh(this.geometry, this.material);
+
+    // 设置渲染顺序：行星应该在轨道和星空之后渲染（正数表示后渲染，会遮挡先渲染的物体）
+    this.mesh.renderOrder = 0; // 默认渲染顺序
     
     // 应用轴倾角（相对于黄道面）
     // 在我们的坐标系中：Y 轴向上（黄道面法线），XZ 是黄道面
-    // 地球的轴倾角 23.44° 表示北极向北黄极方向倾斜
-    // 北黄极在黄道坐标系中位于 +Z 方向（大约）
-    // 使用绕 X 轴旋转，使北极向 +Z 方向倾斜
-    // 这样在春分/秋分时，南北极会位于晨昏线上
+    // 轴倾角使北极从 +Y 方向倾斜
+    // 绕 X 轴负向旋转，使北极向 +Z 方向倾斜
     const tiltDegrees = PLANET_AXIAL_TILT[this.planetName] ?? 0;
     this.axialTilt = THREE.MathUtils.degToRad(tiltDegrees);
     // 初始轴倾角设置（使用四元数，后续在 updateRotation 中会重新设置）
     const initialTiltQuaternion = new THREE.Quaternion();
-    initialTiltQuaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.axialTilt);
+    // 绕 X 轴负向旋转（使用负角度）
+    initialTiltQuaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -this.axialTilt);
     this.mesh.quaternion.copy(initialTiltQuaternion);
     
     // 如果是太阳，创建光晕效果（使用屏幕空间 Sprite 替代嵌套球体）
@@ -173,6 +197,359 @@ export class Planet {
     if (PLANET_GRID_CONFIG.enabled && !this.isSun) {
       this.createLatLonGrid();
     }
+    
+    // 创建土星环（如果是土星）
+    if (this.planetName === 'saturn' && SATURN_RING_CONFIG.enabled) {
+      this.createSaturnRing();
+    }
+  }
+
+
+  /**
+   * 创建行星着色器材质
+   * 实现真实的太阳光照效果：
+   * - 向阳面亮，背阳面暗
+   * - 昼夜交界处平滑渐变
+   * - 支持地球夜间贴图
+   * - 修复极点条纹问题
+   * - 对比度、饱和度、伽马校正
+   * - 菲涅尔边缘光照效果
+   * - 每个天体使用独立的材质参数
+   */
+  private createPlanetShaderMaterial(color: string): THREE.ShaderMaterial {
+    // 获取该天体的特定材质参数
+    const params = getCelestialMaterialParams(this.planetName);
+    
+    const vertexShader = `
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
+      
+      varying vec3 vNormal;
+      varying vec3 vWorldPosition;
+      varying vec2 vUv;
+      varying vec3 vWorldNormal;
+      varying vec3 vPosition;
+      varying vec3 vViewDirection;
+      
+      void main() {
+        vUv = uv;
+        vPosition = position;
+        // 计算世界空间中的法线（考虑模型旋转）
+        vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+        vNormal = normalize(normalMatrix * normal);
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        
+        // 计算视线方向（用于菲涅尔效果）
+        vViewDirection = normalize(cameraPosition - worldPosition.xyz);
+        
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        
+        #include <logdepthbuf_vertex>
+      }
+    `;
+    
+    const fragmentShader = `
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
+      
+      uniform vec3 uColor;
+      uniform vec3 uSunPosition;
+      uniform sampler2D uDayTexture;
+      uniform sampler2D uNightTexture;
+      uniform float uHasTexture;
+      uniform float uHasNightTexture;
+      uniform float uAmbientIntensity;
+      uniform float uTerminatorWidth;
+      uniform float uNightMapIntensity;
+      
+      // 对比度、饱和度、伽马参数
+      uniform float uContrastBoost;
+      uniform float uSaturationBoost;
+      uniform float uGamma;
+      uniform float uMaxDaylightIntensity;
+      uniform float uMinNightIntensity;
+      
+      // 菲涅尔效果参数
+      uniform float uEnableFresnel;
+      uniform float uFresnelIntensity;
+      uniform vec3 uFresnelColor;
+      uniform float uFresnelPower;
+      
+      // 极点修复参数
+      uniform float uPoleBlendStart;
+      uniform float uPoleBlendEnd;
+      uniform float uPoleSampleCount;
+      uniform float uPoleSampleRadius;
+      
+      varying vec3 vNormal;
+      varying vec3 vWorldPosition;
+      varying vec2 vUv;
+      varying vec3 vWorldNormal;
+      varying vec3 vPosition;
+      varying vec3 vViewDirection;
+      
+      // 辅助函数：调整对比度
+      vec3 adjustContrast(vec3 color, float contrast) {
+        return (color - 0.5) * contrast + 0.5;
+      }
+      
+      // 辅助函数：调整饱和度
+      vec3 adjustSaturation(vec3 color, float saturation) {
+        float luminance = dot(color, vec3(0.299, 0.587, 0.114));
+        return mix(vec3(luminance), color, saturation);
+      }
+      
+      // 辅助函数：伽马校正
+      vec3 applyGamma(vec3 color, float gamma) {
+        return pow(max(color, vec3(0.0)), vec3(1.0 / gamma));
+      }
+      
+      void main() {
+        #include <logdepthbuf_fragment>
+        
+        // 计算从行星表面点到太阳的方向（世界空间）
+        vec3 sunDirection = normalize(uSunPosition - vWorldPosition);
+        
+        // 使用世界空间法线计算光照
+        float dotNL = dot(vWorldNormal, sunDirection);
+        
+        // 使用 smoothstep 创建平滑的昼夜过渡
+        float dayFactor = smoothstep(-uTerminatorWidth, uTerminatorWidth, dotNL);
+        
+        // 修复极点条纹：在极点附近使用极点颜色混合
+        // 计算到极点的距离（基于 Y 坐标，假设 Y 轴是极轴）
+        vec3 normalizedPos = normalize(vPosition);
+        float poleDistance = abs(normalizedPos.y); // 0 = 赤道, 1 = 极点
+        
+        // 使用配置参数进行极点混合
+        float poleFactor = smoothstep(uPoleBlendStart, uPoleBlendEnd, poleDistance);
+        
+        // 获取白天颜色
+        vec3 dayColor;
+        if (uHasTexture > 0.5) {
+          // 采样贴图
+          vec3 texColor = texture2D(uDayTexture, vUv).rgb;
+          
+          // 在极点附近，采样周围的颜色进行平均，减少条纹
+          if (poleFactor > 0.0) {
+            // 在极点使用多个采样点的平均值
+            vec3 poleColor = vec3(0.0);
+            for (float i = 0.0; i < 16.0; i++) {
+              if (i >= uPoleSampleCount) break;
+              float angle = i * 3.14159265 * 2.0 / uPoleSampleCount;
+              vec2 offset = vec2(cos(angle), sin(angle)) * uPoleSampleRadius;
+              vec2 sampleUv = vec2(vUv.x + offset.x, vUv.y);
+              // 确保 UV 在有效范围内
+              sampleUv.x = fract(sampleUv.x);
+              poleColor += texture2D(uDayTexture, sampleUv).rgb;
+            }
+            poleColor /= uPoleSampleCount;
+            
+            // 混合原始颜色和极点平均颜色
+            texColor = mix(texColor, poleColor, poleFactor);
+          }
+          
+          dayColor = texColor;
+        } else {
+          dayColor = uColor;
+        }
+        
+        // 计算最终颜色
+        vec3 finalColor;
+        
+        if (uHasNightTexture > 0.5) {
+          // 地球：混合白天和夜间贴图
+          vec3 nightColor = texture2D(uNightTexture, vUv).rgb * uNightMapIntensity;
+          
+          // 在极点也应用相同的混合
+          if (poleFactor > 0.0) {
+            vec3 poleNightColor = vec3(0.0);
+            for (float i = 0.0; i < 16.0; i++) {
+              if (i >= uPoleSampleCount) break;
+              float angle = i * 3.14159265 * 2.0 / uPoleSampleCount;
+              vec2 offset = vec2(cos(angle), sin(angle)) * uPoleSampleRadius;
+              vec2 sampleUv = vec2(vUv.x + offset.x, vUv.y);
+              sampleUv.x = fract(sampleUv.x);
+              poleNightColor += texture2D(uNightTexture, sampleUv).rgb;
+            }
+            poleNightColor /= uPoleSampleCount;
+            nightColor = mix(nightColor, poleNightColor * uNightMapIntensity, poleFactor);
+          }
+          
+          vec3 nightBase = dayColor * uAmbientIntensity + nightColor;
+          finalColor = mix(nightBase, dayColor * uMaxDaylightIntensity, dayFactor);
+        } else {
+          // 其他行星：使用配置的亮度范围
+          float lightIntensity = mix(uAmbientIntensity, uMaxDaylightIntensity, dayFactor);
+          finalColor = dayColor * lightIntensity;
+        }
+        
+        // 确保颜色不会太暗
+        finalColor = max(finalColor, vec3(uMinNightIntensity));
+        
+        // 应用对比度增强
+        finalColor = adjustContrast(finalColor, uContrastBoost);
+        
+        // 应用饱和度增强
+        finalColor = adjustSaturation(finalColor, uSaturationBoost);
+        
+        // 应用伽马校正
+        finalColor = applyGamma(finalColor, uGamma);
+        
+        // 菲涅尔边缘光照效果（模拟大气散射）
+        if (uEnableFresnel > 0.5) {
+          float fresnel = pow(1.0 - max(dot(vWorldNormal, vViewDirection), 0.0), uFresnelPower);
+          // 只在向阳面和边缘添加菲涅尔效果
+          float fresnelMask = max(dayFactor * 0.5 + 0.5, 0.3); // 背面也有一点边缘光
+          finalColor += uFresnelColor * fresnel * uFresnelIntensity * fresnelMask;
+        }
+        
+        // 确保颜色在有效范围内
+        finalColor = clamp(finalColor, vec3(0.0), vec3(1.0));
+        
+        // 输出完全不透明的颜色
+        gl_FragColor = vec4(finalColor, 1.0);
+      }
+    `;
+    
+    // 使用天体特定的菲涅尔颜色
+    const fresnelColor = new THREE.Color(params.fresnelColor);
+    
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: new THREE.Color(color) },
+        uSunPosition: { value: new THREE.Vector3(0, 0, 0) },
+        uDayTexture: { value: null },
+        uNightTexture: { value: null },
+        uHasTexture: { value: 0.0 },
+        uHasNightTexture: { value: 0.0 },
+        // 使用天体特定参数
+        uAmbientIntensity: { value: params.ambientIntensity },
+        uTerminatorWidth: { value: params.terminatorWidth },
+        uNightMapIntensity: { value: params.nightMapIntensity },
+        uContrastBoost: { value: params.contrastBoost },
+        uSaturationBoost: { value: params.saturationBoost },
+        uGamma: { value: params.gamma },
+        uMaxDaylightIntensity: { value: params.maxDaylightIntensity },
+        uMinNightIntensity: { value: params.minNightIntensity },
+        // 菲涅尔效果
+        uEnableFresnel: { value: params.enableFresnelEffect ? 1.0 : 0.0 },
+        uFresnelIntensity: { value: params.fresnelIntensity },
+        uFresnelColor: { value: fresnelColor },
+        uFresnelPower: { value: params.fresnelPower },
+        // 极点修复参数（全局配置）
+        uPoleBlendStart: { value: PLANET_LIGHTING_CONFIG.poleBlendStart },
+        uPoleBlendEnd: { value: PLANET_LIGHTING_CONFIG.poleBlendEnd },
+        uPoleSampleCount: { value: PLANET_LIGHTING_CONFIG.poleSampleCount },
+        uPoleSampleRadius: { value: PLANET_LIGHTING_CONFIG.poleSampleRadius },
+      },
+      vertexShader,
+      fragmentShader,
+      // 确保完全不透明
+      transparent: false,
+      opacity: 1.0,
+      depthWrite: true,
+      depthTest: true,
+      side: THREE.FrontSide,
+      blending: THREE.NormalBlending,
+    });
+    
+    return material;
+  }
+
+  /**
+   * 更新太阳位置（用于光照计算）
+   * 每帧调用以更新着色器中的太阳位置
+   */
+  updateSunPosition(sunPosition: THREE.Vector3): void {
+    if (this.isSun) return;
+    
+    if (this.material instanceof THREE.ShaderMaterial) {
+      this.material.uniforms.uSunPosition.value.copy(sunPosition);
+    }
+  }
+
+
+  /**
+   * 创建土星环
+   * 使用 RingGeometry 创建环形几何体，应用带 alpha 通道的贴图
+   */
+  private createSaturnRing(): void {
+    const cfg = SATURN_RING_CONFIG;
+    const saturnRadius = this.realRadius;
+    
+    // 计算环的内外半径
+    const innerRadius = saturnRadius * cfg.innerRadius;
+    const outerRadius = saturnRadius * cfg.outerRadius;
+    
+    // 创建环形几何体
+    const ringGeometry = new THREE.RingGeometry(innerRadius, outerRadius, cfg.segments, 1);
+    
+    // 修正 UV 映射，使贴图从内到外正确映射
+    const pos = ringGeometry.attributes.position;
+    const uv = ringGeometry.attributes.uv;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const dist = Math.sqrt(x * x + y * y);
+      // 将距离映射到 0-1 范围（内边缘到外边缘）
+      const u = (dist - innerRadius) / (outerRadius - innerRadius);
+      uv.setXY(i, u, 0.5);
+    }
+    uv.needsUpdate = true;
+    
+    // 创建材质（初始使用回退颜色，贴图稍后加载）
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: cfg.fallbackColor,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: cfg.opacity,
+      depthWrite: false, // 避免透明部分遮挡
+    });
+    
+    // 创建环网格
+    this.ringMesh = new THREE.Mesh(ringGeometry, ringMaterial);
+    
+    // 环默认在 XY 平面，需要旋转到 XZ 平面（赤道面）
+    this.ringMesh.rotation.x = -Math.PI / 2;
+    
+    // 将环添加为土星的子对象，这样会跟随土星的轴倾角
+    this.mesh.add(this.ringMesh);
+    
+    // 异步加载环贴图
+    this.loadRingTexture();
+  }
+  
+  /**
+   * 加载土星环贴图
+   */
+  private loadRingTexture(): void {
+    if (!this.ringMesh) return;
+    
+    const loader = new THREE.TextureLoader();
+    loader.load(
+      SATURN_RING_CONFIG.texturePath,
+      (texture) => {
+        // 贴图加载成功
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        this.ringTexture = texture;
+        
+        if (this.ringMesh) {
+          const material = this.ringMesh.material as THREE.MeshBasicMaterial;
+          material.map = texture;
+          material.color.setHex(0xffffff); // 使用贴图颜色
+          material.alphaMap = texture; // 使用贴图的 alpha 通道
+          material.needsUpdate = true;
+        }
+      },
+      undefined,
+      (error) => {
+        console.warn('Failed to load Saturn ring texture:', error);
+        // 保持回退颜色
+      }
+    );
   }
 
   /**
@@ -186,12 +563,17 @@ export class Planet {
     const segs = Math.max(12, cfg.segments || 96);
 
     this.gridGroup = new THREE.Group();
+    
+    // 使用半透明的颜色来模拟透明度效果，但材质本身不透明
+    const gridColor = new THREE.Color(cfg.color);
+    // 将颜色与黑色混合来模拟透明度
+    gridColor.multiplyScalar(cfg.opacity);
+    
     const lineMat = new THREE.LineBasicMaterial({
-      color: new THREE.Color(cfg.color),
-      transparent: true,
-      opacity: cfg.opacity,
-      depthWrite: false,
-      depthTest: true, // 确保深度测试正常工作
+      color: gridColor,
+      transparent: false, // 不透明，确保正确的深度测试
+      depthWrite: true,
+      depthTest: true,
     });
 
     // 经线（固定经度，变化纬度）
@@ -234,6 +616,9 @@ export class Planet {
       
       // 网格位于星球中心，不需要额外缩放（偏移已经在计算中处理）
       this.gridGroup.position.set(0, 0, 0);
+      
+      // 设置渲染顺序：经纬线在行星之后渲染，但会被行星遮挡
+      this.gridGroup.renderOrder = 1;
     }
   }
   
@@ -321,6 +706,7 @@ export class Planet {
     }
   }
 
+
   /**
    * 每帧更新太阳光晕的大小/强度以模拟散射（基于相机距离和视角）
    */
@@ -385,7 +771,8 @@ export class Planet {
     this.markerDiv = document.createElement('div');
     this.markerDiv.style.width = `${MARKER_CONFIG.size}px`;
     this.markerDiv.style.height = `${MARKER_CONFIG.size}px`;
-    const colorHex = this.material.color.getHexString();
+    // 使用保存的原始颜色（因为着色器材质没有 color 属性）
+    const colorHex = this.originalColor.getHexString();
     this.markerDiv.style.border = `${MARKER_CONFIG.strokeWidth}px solid #${colorHex}`;
     this.markerDiv.style.borderRadius = '50%';
     this.markerDiv.style.pointerEvents = 'auto'; // 允许点击标记圈
@@ -457,7 +844,7 @@ export class Planet {
    */
   getMarkerOpacity(): number {
     return this.currentOpacity;
-      }
+  }
 
   /**
    * 更新位置
@@ -477,7 +864,7 @@ export class Planet {
    * 3. 使用四元数来正确组合轴倾角和自转
    * 
    * 坐标系约定：
-   * - Y 轴向上（黄道面法线方向）
+   * - Y 轴向上（黄道面法线方向，指向北黄极）
    * - XZ 平面是黄道面
    * - 北极默认指向 +Y，轴倾角使其向 +Z 方向倾斜
    */
@@ -510,12 +897,13 @@ export class Planet {
     
     // 使用四元数正确组合轴倾角和自转
     // 步骤：
-    // 1. 创建轴倾角四元数：绕 X 轴旋转，使北极向 +Z 方向倾斜
+    // 1. 创建轴倾角四元数：绕 X 轴负向旋转，使北极向 +Z 方向倾斜
     // 2. 创建自转四元数：绕 Y 轴（本地坐标系）旋转
     // 3. 组合：先应用轴倾角，再应用自转（自转是绕倾斜后的轴）
     
     const tiltQuaternion = new THREE.Quaternion();
-    tiltQuaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.axialTilt);
+    // 绕 X 轴负向旋转（使用负角度）
+    tiltQuaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -this.axialTilt);
     
     const spinQuaternion = new THREE.Quaternion();
     spinQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.accumulatedRotation);
@@ -562,12 +950,13 @@ export class Planet {
     
     // 使用四元数正确组合轴倾角和朝向
     // 步骤：
-    // 1. 创建轴倾角四元数：绕 X 轴旋转
+    // 1. 创建轴倾角四元数：绕 X 轴负向旋转（使北极向 +Z 方向倾斜）
     // 2. 创建朝向四元数：绕 Y 轴旋转使卫星面向母行星
     // 3. 组合：先应用轴倾角，再应用朝向
     
     const tiltQuaternion = new THREE.Quaternion();
-    tiltQuaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.axialTilt);
+    // 绕 X 轴负向旋转（使用负角度）
+    tiltQuaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -this.axialTilt);
     
     const facingQuaternion = new THREE.Quaternion();
     facingQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetRotationY);
@@ -616,29 +1005,33 @@ export class Planet {
   updateGridVisibility(distance: number): void {
     if (!this.gridGroup) return;
     
-    // 根据距离调整网格不透明度
+    // 根据距离调整网格颜色亮度（模拟透明度效果）
     // 距离越近，网格越清晰；距离越远，网格越淡
     const minDistance = this.realRadius * 2; // 最小距离（网格完全可见）
     const maxDistance = this.realRadius * 50; // 最大距离（网格开始淡出）
     
-    let opacity = PLANET_GRID_CONFIG.opacity;
+    let brightness = PLANET_GRID_CONFIG.opacity;
     if (distance > minDistance) {
       const fadeRange = maxDistance - minDistance;
       const fadeProgress = Math.min(1, (distance - minDistance) / fadeRange);
-      opacity = PLANET_GRID_CONFIG.opacity * (1 - fadeProgress * 0.7); // 最多淡化70%
+      brightness = PLANET_GRID_CONFIG.opacity * (1 - fadeProgress * 0.7); // 最多淡化70%
     }
     
-    // 更新所有网格线的不透明度
+    // 更新所有网格线的颜色亮度
+    const baseColor = new THREE.Color(PLANET_GRID_CONFIG.color);
+    const adjustedColor = baseColor.clone().multiplyScalar(brightness);
+    
     this.gridGroup.traverse((child) => {
       if (child instanceof THREE.Line) {
         const material = child.material as THREE.LineBasicMaterial;
         if (material) {
-          material.opacity = opacity;
+          material.color.copy(adjustedColor);
           material.needsUpdate = true;
         }
       }
     });
   }
+
 
   /**
    * 更新 LOD（根据相机距离动态调整星球的几何细节）
@@ -725,7 +1118,7 @@ export class Planet {
    * CRITICAL: 
    * - Sun 排除：永远不对太阳应用贴图（保持 emissive-only）
    * - 贴图仅用于渲染，不影响物理计算
-   * - 应用贴图时将材质颜色设为白色，避免颜色叠加
+   * - 支持着色器材质的贴图应用
    * 
    * @param texture - THREE.Texture 实例（或 null 表示回退到纯色）
    * @param bodyId - 天体 ID（用于引用跟踪）
@@ -737,12 +1130,41 @@ export class Planet {
     }
     
     if (texture) {
-      this.material.map = texture;
-      // 将材质颜色设为白色，避免与贴图颜色叠加
-      this.material.color.setHex(0xffffff);
-      this.material.needsUpdate = true;
+      if (this.material instanceof THREE.ShaderMaterial) {
+        // 着色器材质：设置 uniform（使用 float 而不是 bool）
+        this.material.uniforms.uDayTexture.value = texture;
+        this.material.uniforms.uHasTexture.value = 1.0;
+        this.material.needsUpdate = true;
+      } else if (this.material instanceof THREE.MeshStandardMaterial) {
+        // 标准材质：设置 map
+        this.material.map = texture;
+        this.material.color.setHex(0xffffff);
+        this.material.needsUpdate = true;
+      }
       this.textureLoaded = true;
       this.textureBodyId = bodyId;
+      
+      // 有贴图的星球隐藏经纬线
+      if (this.gridGroup) {
+        this.gridGroup.visible = false;
+      }
+    }
+  }
+
+  /**
+   * 应用夜间贴图（仅地球）
+   * 
+   * @param texture - THREE.Texture 实例
+   */
+  applyNightTexture(texture: THREE.Texture | null): void {
+    if (this.isSun || !texture) return;
+    
+    if (this.material instanceof THREE.ShaderMaterial) {
+      this.material.uniforms.uNightTexture.value = texture;
+      this.material.uniforms.uHasNightTexture.value = 1.0;
+      this.material.needsUpdate = true;
+      this.nightTexture = texture;
+      this.hasNightMap = true;
     }
   }
 
@@ -764,9 +1186,20 @@ export class Planet {
     // 清除贴图引用（实际 GPU 资源由 TextureManager 管理）
     if (this.textureBodyId) {
       // 注意：TextureManager.releaseTexture 由外部调用
-      this.material.map = null;
+      if (this.material instanceof THREE.ShaderMaterial) {
+        this.material.uniforms.uDayTexture.value = null;
+        this.material.uniforms.uNightTexture.value = null;
+      } else if (this.material instanceof THREE.MeshStandardMaterial) {
+        this.material.map = null;
+      }
       this.textureBodyId = null;
       this.textureLoaded = false;
+    }
+
+    // 清除夜间贴图引用
+    if (this.nightTexture) {
+      this.nightTexture = null;
+      this.hasNightMap = false;
     }
     
     if (this.markerObject && this.markerObject.parent) {
@@ -788,9 +1221,26 @@ export class Planet {
       if (this.gridGroup.parent) this.gridGroup.parent.remove(this.gridGroup);
       this.gridGroup = null;
     }
+    
+    // 清理土星环
+    if (this.ringMesh) {
+      if (this.ringMesh.geometry) {
+        this.ringMesh.geometry.dispose();
+      }
+      if (this.ringMesh.material) {
+        (this.ringMesh.material as THREE.Material).dispose();
+      }
+      if (this.ringMesh.parent) {
+        this.ringMesh.parent.remove(this.ringMesh);
+      }
+      this.ringMesh = null;
+    }
+    if (this.ringTexture) {
+      this.ringTexture.dispose();
+      this.ringTexture = null;
+    }
 
     this.geometry.dispose();
     this.material.dispose();
   }
 }
-

@@ -59,9 +59,11 @@ export class SatelliteOrbit {
     // 简单材质（不做渐变，因为卫星轨道通常较小）
     const material = new THREE.LineBasicMaterial({
       color: new THREE.Color(this.color),
-      transparent: true,
-      opacity: 0.35,
+      transparent: false, // 不透明，确保正确的深度测试
+      opacity: 1.0,
       linewidth: ORBIT_RENDER_CONFIG.lineWidth,
+      depthWrite: true,
+      depthTest: true,
     });
 
     this.line = new THREE.Line(geometry, material);

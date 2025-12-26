@@ -54,6 +54,7 @@ export default function Header() {
           display: 'flex',
           alignItems: 'center',
           gap: `${cfg.contentGap ?? HEADER_CONFIG.contentGap}px`,
+          opacity: cfg.logoOpacity ?? 1, // 整体透明度
         }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
