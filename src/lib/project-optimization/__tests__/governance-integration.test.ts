@@ -64,8 +64,8 @@ describe('GovernanceAnalyzer Integration', () => {
           imports: [
             {
               source: 'lib/astronomy/constants/axialTilt',
-              specifiers: [{ imported: 'EARTH_AXIAL_TILT', local: 'EARTH_AXIAL_TILT', type: 'named' }],
-              type: 'import'
+              specifiers: [{ imported: 'EARTH_AXIAL_TILT', local: 'EARTH_AXIAL_TILT', type: 'named' as const }],
+              type: 'import' as const
             }
           ],
           exports: [],

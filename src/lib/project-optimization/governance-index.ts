@@ -4,6 +4,11 @@ export * from './governance-interfaces';
 export * from './governance-core';
 export * from './governance-config';
 
+// Implementation exports
+export { LayerSeparationValidator } from './layer-separation-validator';
+export { RendererStupidityCheckerImpl, createRendererStupidityChecker, extractRendererViolations } from './renderer-stupidity-checker';
+export { StructuralFailureDetector } from './structural-failure-detector';
+
 // Re-export specific types to avoid conflicts
 export type {
   GovernanceSpec,
@@ -22,7 +27,7 @@ export type {
 export type {
   GovernanceAnalyzer,
   SSOTViolationDetector,
-  LayerSeparationValidator,
+  LayerSeparationValidator as ILayerSeparationValidator,
   RendererStupidityChecker,
   MagicNumberDetector,
   StructuralFailureDetector,

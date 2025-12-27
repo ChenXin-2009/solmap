@@ -1,128 +1,210 @@
-// Example usage of the GovernanceAnalyzer
-// This demonstrates how to use the governance analyzer to check SolMap project compliance
+// Example usage of the Renderer Stupidity Checker
+import { createRendererStupidityChecker, extractRendererViolations } from './renderer-stupidity-checker';
+import { ProjectAST, ModuleInfo } from './types';
+import { ImportInfo, FileAST as GovernanceFileAST } from './governance-interfaces';
 
-import { GovernanceAnalyzerImpl } from './governance-analyzer';
-import { ViolationType, ViolationSeverity } from './governance-types';
+/**
+ * Example demonstrating how to use the Renderer Stupidity Checker
+ * to detect violations of Spec-3 (Renderer Stupidity) governance rules
+ */
+export function demonstrateRendererStupidityChecker() {
+  const checker = createRendererStupidityChecker();
 
-export async function analyzeProjectGovernance(projectPath: string = '.') {
-  const analyzer = new GovernanceAnalyzerImpl();
-  
-  try {
-    console.log('🔍 Starting governance analysis...');
-    
-    // Perform complete governance analysis
-    const analysis = await analyzer.analyzeProject(projectPath);
-    
-    console.log('\n📊 Governance Analysis Results:');
-    console.log(`Overall Compliance Score: ${analysis.overallCompliance.overall}/100`);
-    console.log(`Critical Violations: ${analysis.overallCompliance.criticalViolations}`);
-    console.log(`Trend: ${analysis.overallCompliance.trend}`);
-    
-    // Report violations by type
-    const violationsByType = new Map<ViolationType, number>();
-    for (const violation of analysis.specViolations) {
-      violationsByType.set(violation.violationType, (violationsByType.get(violation.violationType) || 0) + 1);
-    }
-    
-    console.log('\n🚨 Violations by Type:');
-    for (const [type, count] of violationsByType) {
-      console.log(`  ${type}: ${count}`);
-    }
-    
-    // Report structural failures
-    if (analysis.structuralFailures.length > 0) {
-      console.log('\n⚠️  Structural Failures:');
-      for (const failure of analysis.structuralFailures) {
-        console.log(`  ${failure.problemArea}: ${failure.description}`);
+  // Example project AST with renderer and non-renderer modules
+  const projectAST: ProjectAST = {
+    files: [],
+    modules: [
+      {
+        name: 'SolarSystemCanvas3D',
+        path: 'src/components/canvas/3d/SolarSystemCanvas3D.tsx',
+        exports: ['SolarSystemCanvas3D'],
+        imports: ['axialTilt', 'rotationPeriod', 'position', 'rotation'], // Mixed good and bad imports
+        dependencies: ['three', 'lib/astronomy/constants/axialTilt'] // Bad dependency
+      },
+      {
+        name: 'Planet',
+        path: 'src/lib/3d/Planet.ts',
+        exports: ['Planet', 'calculateOrbit'], // Bad export - calculation in renderer
+        imports: ['THREE', 'material', 'geometry'],
+        dependencies: []
+      },
+      {
+        name: 'OrbitCalculator',
+        path: 'src/lib/astronomy/orbit.ts', // Not a renderer - should be ignored
+        exports: ['calculateOrbit'],
+        imports: ['axialTilt', 'physicalParams'],
+        dependencies: []
       }
+    ],
+    dependencies: []
+  };
+
+  console.log('=== Renderer Stupidity Checker Demo ===\n');
+
+  // 1. Identify renderer modules
+  console.log('1. Identifying renderer modules...');
+  const rendererModules = checker.identifyRendererModules(projectAST);
+  console.log('Found renderer modules:', rendererModules);
+  console.log();
+
+  // 2. Check renderer inputs
+  console.log('2. Checking renderer inputs...');
+  const rendererModuleInfos = projectAST.modules.filter(m => 
+    rendererModules.includes(m.path)
+  );
+  const inputViolations = checker.checkRendererInputs(rendererModuleInfos);
+  console.log(`Found ${inputViolations.length} input violations:`);
+  inputViolations.forEach(violation => {
+    console.log(`  - ${violation.rendererModule}: ${violation.violations.join(', ')}`);
+  });
+  console.log();
+
+  // 3. Detect physics knowledge in renderer code
+  console.log('3. Detecting physics knowledge in renderer code...');
+  const rendererCode = [
+    'const tilt = axialTilt * Math.PI / 180;', // Bad - physics knowledge
+    'const period = rotationPeriod * 24 * 3600;', // Bad - physics knowledge
+    'mesh.position.set(x, y, z);', // Good - just rendering
+    'const orbit = calculateKepler(planet);' // Bad - physics calculation
+  ];
+  const knowledgeViolations = checker.detectPhysicsKnowledge(rendererCode);
+  console.log(`Found ${knowledgeViolations.length} physics knowledge violations:`);
+  knowledgeViolations.forEach(violation => {
+    console.log(`  - Detected concepts: ${violation.detectedConcepts.join(', ')}`);
+  });
+  console.log();
+
+  // 4. Validate renderer imports
+  console.log('4. Validating renderer imports...');
+  const imports: ImportInfo[] = [
+    {
+      source: 'lib/astronomy/constants/axialTilt',
+      imported: ['EARTH_AXIAL_TILT'],
+      location: { file: 'src/components/canvas/3d/SolarSystemCanvas3D.tsx', line: 1, column: 1 },
+      module: 'src/components/canvas/3d/SolarSystemCanvas3D.tsx'
+    },
+    {
+      source: 'three',
+      imported: ['Mesh', 'Material'],
+      location: { file: 'src/lib/3d/Planet.ts', line: 1, column: 1 },
+      module: 'src/lib/3d/Planet.ts'
     }
-    
-    // Report by spec compliance
-    console.log('\n📋 Compliance by Spec:');
-    for (const [spec, score] of Object.entries(analysis.overallCompliance.bySpec)) {
-      console.log(`  ${spec}: ${score}/100`);
+  ];
+  const importViolations = checker.validateRendererImports(imports);
+  console.log(`Found ${importViolations.length} import violations:`);
+  importViolations.forEach(violation => {
+    console.log(`  - ${violation.rendererModule}: ${violation.violations.map(v => v.importedModule).join(', ')}`);
+  });
+  console.log();
+
+  // 5. Check computation logic
+  console.log('5. Checking computation logic...');
+  const rendererAST: GovernanceFileAST[] = [
+    {
+      path: 'src/components/canvas/3d/SolarSystemCanvas3D.tsx',
+      ast: {},
+      imports: [],
+      exports: [],
+      functions: [
+        {
+          name: 'calculateAngle', // Bad - calculation in renderer
+          parameters: ['x', 'y'],
+          location: { file: 'src/components/canvas/3d/SolarSystemCanvas3D.tsx', line: 10, column: 1 },
+          complexity: 5
+        },
+        {
+          name: 'render', // Good - rendering function
+          parameters: ['scene'],
+          location: { file: 'src/components/canvas/3d/SolarSystemCanvas3D.tsx', line: 20, column: 1 },
+          complexity: 3
+        }
+      ],
+      computations: [
+        {
+          type: 'trigonometric',
+          description: 'angle calculation using Math.sin',
+          location: { file: 'src/components/canvas/3d/SolarSystemCanvas3D.tsx', line: 15, column: 1 },
+          variables: ['angle']
+        }
+      ]
     }
-    
-    // Provide recommendations
-    console.log('\n💡 Recommendations:');
-    if (analysis.overallCompliance.criticalViolations > 0) {
-      console.log('  🔴 CRITICAL: Address critical violations immediately');
-      console.log('  🔴 Consider freezing feature development until resolved');
-    }
-    
-    const highSeverityViolations = analysis.specViolations.filter(v => v.severity === ViolationSeverity.HIGH).length;
-    if (highSeverityViolations > 0) {
-      console.log(`  🟡 HIGH: ${highSeverityViolations} high-severity violations need attention`);
-    }
-    
-    if (analysis.structuralFailures.length > 0) {
-      console.log('  🔄 REFACTORING: Structural refactoring recommended');
-    }
-    
-    if (analysis.overallCompliance.overall >= 90) {
-      console.log('  ✅ EXCELLENT: Project maintains high governance standards');
-    } else if (analysis.overallCompliance.overall >= 70) {
-      console.log('  ✅ GOOD: Project follows most governance principles');
-    } else {
-      console.log('  ❌ NEEDS IMPROVEMENT: Significant governance issues detected');
-    }
-    
-    return analysis;
-    
-  } catch (error) {
-    console.error('❌ Governance analysis failed:', error);
-    throw error;
-  }
+  ];
+  const computationViolations = checker.checkComputationLogic(rendererAST);
+  console.log(`Found ${computationViolations.length} computation violations:`);
+  computationViolations.forEach(violation => {
+    console.log(`  - ${violation.rendererModule}: ${violation.description}`);
+    console.log(`    Suggested fix: ${violation.suggestedFix}`);
+  });
+  console.log();
+
+  // 6. Extract all violations as unified renderer violations
+  console.log('6. Extracting unified renderer violations...');
+  const allViolations = extractRendererViolations(
+    inputViolations,
+    knowledgeViolations,
+    importViolations,
+    computationViolations
+  );
+  console.log(`Total renderer violations: ${allViolations.length}`);
+  allViolations.forEach((violation, index) => {
+    console.log(`  ${index + 1}. ${violation.specNumber}: ${violation.description}`);
+    console.log(`     Reference: ${violation.governanceReference}`);
+    console.log(`     Severity: ${violation.severity}`);
+  });
+  console.log();
+
+  console.log('=== Demo Complete ===');
+  console.log('The Renderer Stupidity Checker successfully detected violations of Spec-3 governance rules.');
+  console.log('This ensures that rendering layers remain "stupid" and do not contain physics logic.');
+
+  return {
+    rendererModules,
+    inputViolations,
+    knowledgeViolations,
+    importViolations,
+    computationViolations,
+    allViolations
+  };
 }
 
-// Example of how to check specific violations
-export function checkForCommonViolations(analysis: any) {
-  console.log('\n🔍 Common Violation Patterns:');
+/**
+ * Example of how to integrate the checker into a CI/CD pipeline
+ */
+export function checkProjectCompliance(projectAST: ProjectAST): boolean {
+  const checker = createRendererStupidityChecker();
   
-  // Check for SSOT violations
-  const ssotViolations = analysis.specViolations.filter((v: any) => v.violationType === ViolationType.SSOT_VIOLATION);
-  if (ssotViolations.length > 0) {
-    console.log(`  📍 SSOT Violations: ${ssotViolations.length}`);
-    console.log('    - Multiple definitions of physics concepts detected');
-    console.log('    - Consider consolidating to authority files in lib/astronomy/constants/');
-  }
-  
-  // Check for renderer intelligence
-  const rendererViolations = analysis.specViolations.filter((v: any) => v.violationType === ViolationType.RENDERER_INTELLIGENCE);
-  if (rendererViolations.length > 0) {
-    console.log(`  🎨 Renderer Intelligence: ${rendererViolations.length}`);
-    console.log('    - Rendering layer contains physics logic');
-    console.log('    - Move calculations to appropriate physics/astronomy layers');
-  }
-  
-  // Check for magic numbers
-  const magicNumbers = analysis.specViolations.filter((v: any) => v.violationType === ViolationType.MAGIC_NUMBER);
-  if (magicNumbers.length > 0) {
-    console.log(`  🔢 Magic Numbers: ${magicNumbers.length}`);
-    console.log('    - Hardcoded constants detected');
-    console.log('    - Extract to authority constant files');
-  }
-  
-  // Check for constants pollution
-  const constantsPollution = analysis.specViolations.filter((v: any) => v.violationType === ViolationType.CONSTANTS_POLLUTION);
-  if (constantsPollution.length > 0) {
-    console.log(`  🧹 Constants Pollution: ${constantsPollution.length}`);
-    console.log('    - Logic found in constants files');
-    console.log('    - Keep constants files pure (only constants and Object.freeze)');
-  }
-}
+  // Get all renderer modules
+  const rendererModules = checker.identifyRendererModules(projectAST);
+  const rendererModuleInfos = projectAST.modules.filter(m => 
+    rendererModules.includes(m.path)
+  );
 
-// Example usage (commented out to avoid execution during import)
-/*
-async function main() {
-  try {
-    const analysis = await analyzeProjectGovernance('.');
-    checkForCommonViolations(analysis);
-  } catch (error) {
-    console.error('Analysis failed:', error);
-  }
-}
+  // Check all types of violations
+  const inputViolations = checker.checkRendererInputs(rendererModuleInfos);
+  const importViolations = checker.validateRendererImports([]);
+  const computationViolations = checker.checkComputationLogic([]);
 
-// Uncomment to run
-// main();
-*/
+  // Convert to unified violations
+  const allViolations = extractRendererViolations(
+    inputViolations,
+    [],
+    importViolations,
+    computationViolations
+  );
+
+  // Check if there are any critical violations
+  const criticalViolations = allViolations.filter(v => 
+    v.severity === 'critical' || v.severity === 'high'
+  );
+
+  if (criticalViolations.length > 0) {
+    console.error(`❌ Project fails Spec-3 compliance: ${criticalViolations.length} critical violations found`);
+    criticalViolations.forEach(violation => {
+      console.error(`   - ${violation.description}`);
+    });
+    return false;
+  }
+
+  console.log('✅ Project passes Spec-3 compliance: No critical renderer stupidity violations found');
+  return true;
+}

@@ -17,8 +17,18 @@
 // 4. 用户体验：点击行星后可继续滚轮放大，可以看清行星表面纹理和细节
 //
 
-// 🎯 相机配置已移至 cameraConfig.ts 文件，便于管理和调试
-// 如需使用相机配置，请直接从 './cameraConfig' 导入
+// 🎯 相机配置已移至专门文件，便于管理和调试
+// 导入相机相关配置（向后兼容）
+export {
+  CAMERA_CONFIG,
+  CAMERA_VIEW_CONFIG,
+  CAMERA_OPERATION_CONFIG,
+  CAMERA_ZOOM_CONFIG,
+  CAMERA_FOCUS_CONFIG,
+  CAMERA_TRACKING_CONFIG,
+  CAMERA_PENETRATION_CONFIG,
+  QUICK_CAMERA_SETTINGS
+} from './cameraConfig';
 
 /**
  * 轨道颜色池
@@ -127,7 +137,7 @@ export const ORBIT_GRADIENT_CONFIG = {
  *   如果需要在所有平台上可见的粗线效果，请考虑使用带宽度的 TubeGeometry 或平面条带替代。
  */
 export const ORBIT_RENDER_CONFIG = {
-  lineWidth: 3,
+  lineWidth: 2,
 };
 
 /**
@@ -336,8 +346,8 @@ export const CAMERA_ZOOM_CONFIG = {
   zoomBaseFactor: 0.15,
   
   // 缩放缓动速度（0-1之间，越大越快）
-  // 适中提高缓动速度，改善大范围缩放体验
-  zoomEasingSpeed: 0.22,
+  // 降低缓动速度，确保所有范围都有明显的缓动效果
+  zoomEasingSpeed: 0.15,
 };
 
 /**

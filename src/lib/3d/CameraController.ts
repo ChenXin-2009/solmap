@@ -9,27 +9,16 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  CAMERA_VIEW_CONFIG,
-  CAMERA_OPERATION_CONFIG,
-  CAMERA_ZOOM_CONFIG,
-  CAMERA_FOCUS_CONFIG,
-  CAMERA_TRACKING_CONFIG
-} from '@/lib/config/visualConfig';
-
-// 防穿透约束配置（用于确保相机不会穿过行星表面）
-import { CAMERA_PENETRATION_CONFIG } from '@/lib/config/visualConfig';
+  CAMERA_CONFIG,
+  CAMERA_PENETRATION_CONFIG,
+  QUICK_CAMERA_SETTINGS
+} from '@/lib/config/cameraConfig';
+import { cameraConfigManager, type CameraConfigType } from '@/lib/config/CameraConfigManager';
 
 // Enhanced focus management
 import { FocusManager, type CelestialObject, type FocusOptions } from './FocusManager';
 
-// 兼容旧代码中对单一 CAMERA_CONFIG 的使用（将分散的配置合并为一个便捷对象）
-const CAMERA_CONFIG = {
-  ...CAMERA_VIEW_CONFIG,
-  ...CAMERA_OPERATION_CONFIG,
-  ...CAMERA_ZOOM_CONFIG,
-  ...CAMERA_FOCUS_CONFIG,
-  ...CAMERA_TRACKING_CONFIG
-};
+// 兼容旧代码中对单一 CAMERA_CONFIG 的使用（现在直接使用新的统一配置）
 
 export type CameraMode = 'free' | 'locked' | 'follow';
 
@@ -42,6 +31,10 @@ export class CameraController {
   
   // Enhanced focus management
   private focusManager: FocusManager;
+  
+  // 实时配置管理
+  private currentConfig: CameraConfigType;
+  private configUnsubscribe: (() => void) | null = null;
   
   // 平滑缩放相关
   private smoothDistance: number = 0; // 当前平滑的距离
@@ -72,6 +65,9 @@ export class CameraController {
     this.camera = camera;
     this.domElement = domElement;
     
+    // 初始化配置管理（但暂不设置监听器）
+    this.currentConfig = cameraConfigManager.getConfig();
+    
     // Initialize enhanced focus manager
     this.focusManager = new FocusManager();
     
@@ -80,6 +76,18 @@ export class CameraController {
     this.camera.updateProjectionMatrix();
     
     this.controls = new OrbitControls(camera, domElement);
+    
+    // ⚠️ 重要：在 OrbitControls 初始化后再设置配置监听器
+    this.setupConfigListener();
+    
+    // 🐛 强制调试：显示当前配置
+    console.log('🔧 CameraController 初始化 - 当前配置:', {
+      largeZoomMaxSpeed: this.currentConfig.largeZoomMaxSpeed,
+      smallZoomMaxSpeed: this.currentConfig.smallZoomMaxSpeed,
+      zoomEasingSpeed: this.currentConfig.zoomEasingSpeed,
+      zoomBaseFactor: this.currentConfig.zoomBaseFactor,
+      configSource: 'CameraConfigManager'
+    });
     
     // 配置 OrbitControls - 优化缓动效果
     this.controls.enableDamping = true; // 启用阻尼（惯性效果）
@@ -482,7 +490,7 @@ export class CameraController {
         
         // ⚠️ 性能优化：限制更新频率，避免过于频繁的计算
         const currentTime = performance.now();
-        if (currentTime - lastUpdateTime < 16) { // 限制为60fps
+        if (currentTime - lastUpdateTime < 8) { // 提高到120fps，改善大范围缩放的平滑度
           return;
         }
         lastUpdateTime = currentTime;
@@ -534,12 +542,14 @@ export class CameraController {
     };
 
     this.touchEndHandler = (e: TouchEvent) => {
-      // 完整重置所有缩放相关状态
+      // ⚠️ 修复触控缩放惯性问题：不要立即停止缩放状态
+      // 让缩放继续进行直到自然完成，这样就有惯性效果
       if (e.touches.length < 2) {
         isPinching = false;
         initialDistance = 0;
         initialSmoothDistance = 0;
         lastUpdateTime = 0;
+        // 注意：不要设置 this.isZooming = false，让缩放自然完成
       }
     };
 
@@ -666,6 +676,40 @@ export class CameraController {
     this.focusOnTarget(targetPosition, celestialObject, trackingTargetGetter, { distance: targetDistance });
   }
   
+  /**
+   * 设置配置监听器（在 OrbitControls 初始化后调用）
+   */
+  private setupConfigListener() {
+    // 监听配置变更
+    this.configUnsubscribe = cameraConfigManager.addListener((newConfig) => {
+      console.log('🔧 CameraController 收到配置更新:', newConfig);
+      this.currentConfig = newConfig;
+      this.applyConfigChanges(newConfig);
+    });
+  }
+
+  /**
+   * 应用配置变更
+   */
+  private applyConfigChanges(config: CameraConfigType) {
+    // 检查 controls 是否已初始化
+    if (!this.controls) {
+      console.log('🔧 OrbitControls 尚未初始化，跳过配置应用');
+      return;
+    }
+    
+    // 更新 OrbitControls 的相关配置
+    this.controls.dampingFactor = config.dampingFactor;
+    
+    console.log('🔧 配置已应用到 CameraController:', {
+      dampingFactor: config.dampingFactor,
+      largeZoomMaxSpeed: config.largeZoomMaxSpeed,
+      smallZoomMaxSpeed: config.smallZoomMaxSpeed,
+      zoomEasingSpeed: config.zoomEasingSpeed,
+      zoomBaseFactor: config.zoomBaseFactor
+    });
+  }
+
   /**
    * 重置最小距离到默认值（用于取消聚焦时）
    */
@@ -815,6 +859,14 @@ export class CameraController {
 
   // 手动缩放方法（带平滑效果和增强的防穿透）
   zoom(delta: number) {
+    // 🐛 强制调试：每次缩放都显示配置
+    console.log('🔧 zoom() 调用 - 滚轮敏感度测试:', {
+      delta,
+      '当前配置zoomBaseFactor': this.currentConfig.zoomBaseFactor,
+      '硬编码测试值': 0.5,
+      timestamp: Date.now()
+    });
+    
     // 如果正在聚焦，先停止聚焦
     if (this.isFocusing) {
       this.isFocusing = false;
@@ -838,7 +890,11 @@ export class CameraController {
     }
     
     // 计算缩放因子（更精细的控制）
-    const baseFactor = CAMERA_CONFIG.zoomBaseFactor;
+    const baseFactor = this.currentConfig.zoomBaseFactor; // 🔧 使用实时配置
+    console.log('🔧 baseFactor 实时配置测试:', {
+      '当前配置值': this.currentConfig.zoomBaseFactor,
+      '实际使用值': baseFactor
+    });
     const scrollSpeed = Math.min(Math.abs(delta), 2); // 限制最大滚动速度影响
     // delta > 0 表示放大（拉近），delta < 0 表示缩小（拉远）
     // 在3D中，delta > 0 应该减小距离（拉近相机），delta < 0 应该增加距离（拉远相机）
@@ -1107,19 +1163,32 @@ export class CameraController {
       this.controls.target.lerp(targetPos, this.followSpeed);
     }
     
+    // ⚠️ 关键优化：只有在真正需要缩放时才执行缩放逻辑
     // 平滑缩放实现（类似2D版本的缓动效果）
     // ⚠️ 重要：缩放逻辑必须在跟踪逻辑之前执行，这样跟踪逻辑才能使用缩放后的距离
     if (this.isZooming) {
       const distanceDiff = this.targetDistance - this.smoothDistance;
       
-      // ⚠️ 性能优化：降低完成阈值，让缩放更快完成，减少卡顿
-      if (Math.abs(distanceDiff) > 0.001) { // 从0.01降低到0.001
-        // 使用缓动函数实现平滑过渡（ease-out），与2D版本一致
-        // 使用更快的缓动速度，让缩放更流畅
-        const speed = CAMERA_CONFIG.zoomEasingSpeed;
+      // ⚠️ 性能优化：使用自适应完成阈值，大距离时使用更大的阈值
+      const adaptiveThreshold = Math.max(0.001, Math.min(0.1, this.smoothDistance * 0.001));
+      
+      if (Math.abs(distanceDiff) > adaptiveThreshold) {
+        // ⚠️ 简化缩放算法：统一的缓动速度，不区分大小范围
+        const baseSpeed = this.currentConfig.zoomEasingSpeed;
         
-        // ⚠️ 关键优化：使用自适应缓动速度，距离目标越近速度越快
-        const adaptiveSpeed = Math.min(0.8, speed * (1 + Math.abs(distanceDiff) / this.smoothDistance));
+        // 🐛 调试：输出当前配置值
+        if (Math.random() < 0.01) { // 偶尔输出，避免刷屏
+          console.log('🔧 统一缩放配置调试:', {
+            zoomEasingSpeed: this.currentConfig.zoomEasingSpeed,
+            zoomBaseFactor: this.currentConfig.zoomBaseFactor,
+            distanceDiff: Math.abs(distanceDiff),
+            smoothDistance: this.smoothDistance
+          });
+        }
+        
+        // 使用统一的缓动速度，不区分大小范围
+        const adaptiveSpeed = baseSpeed;
+        
         this.smoothDistance += distanceDiff * adaptiveSpeed;
         
         // 如果正在跟踪，更新跟踪距离（让跟踪逻辑使用缩放后的距离）
@@ -1127,6 +1196,7 @@ export class CameraController {
           this.trackingDistance = this.smoothDistance;
         }
         
+        // ⚠️ 性能优化：减少不必要的向量计算
         // 应用平滑缩放：调整相机位置以匹配平滑距离
         const direction = new THREE.Vector3()
           .subVectors(this.camera.position, this.controls.target);
@@ -1234,6 +1304,7 @@ export class CameraController {
       }
     }
     
+    // ⚠️ 性能优化：只在必要时同步距离
     // 确保平滑距离始终与当前距离同步（防止累积误差）
     if (!this.isZooming && !this.isTracking) {
       const currentDistance = this.camera.position.distanceTo(this.controls.target);
@@ -1291,6 +1362,12 @@ export class CameraController {
   }
 
   dispose(): void {
+    // 清理配置监听器
+    if (this.configUnsubscribe) {
+      this.configUnsubscribe();
+      this.configUnsubscribe = null;
+    }
+    
     // 清理事件监听器
     if (this.wheelHandler && this.domElement) {
       this.domElement.removeEventListener('wheel', this.wheelHandler);

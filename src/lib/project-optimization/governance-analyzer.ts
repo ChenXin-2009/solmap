@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TypeScriptCodeAnalyzer } from './analyzer';
 import { GovernanceAnalyzer } from './governance-interfaces';
+import { SSOTViolationDetectorImpl } from './ssot-violation-detector';
 import {
   GovernanceAnalysis,
   SpecViolation,
@@ -17,7 +18,8 @@ import {
   RefactoringUrgency,
   ModificationRecord,
   ComplianceScore,
-  ComplianceTrend
+  ComplianceTrend,
+  SSOTViolation
 } from './governance-types';
 import {
   ProjectAST,
@@ -36,10 +38,12 @@ import {
 
 export class GovernanceAnalyzerImpl implements GovernanceAnalyzer {
   private codeAnalyzer: TypeScriptCodeAnalyzer;
+  private ssotDetector: SSOTViolationDetectorImpl;
   private governanceSpecs: GovernanceSpec[] = [];
 
   constructor() {
     this.codeAnalyzer = new TypeScriptCodeAnalyzer();
+    this.ssotDetector = new SSOTViolationDetectorImpl();
   }
 
   async analyzeProject(projectPath: string): Promise<GovernanceAnalysis> {
@@ -54,6 +58,74 @@ export class GovernanceAnalyzerImpl implements GovernanceAnalyzer {
     const physicsViolations = this.checkPhysicsSystemPriority(ast);
     const structuralFailures = this.detectStructuralFailures(ast, this.createMockHistory());
 
+    // SSOT violation detection
+    const duplicateDefinitions = this.ssotDetector.detectDuplicateDefinitions(ast);
+    const physicsConstantViolations = this.ssotDetector.validatePhysicsConstants(ast);
+    const authorityViolations = this.ssotDetector.checkAuthorityDefinitions(ast);
+    const constantsViolations = this.ssotDetector.validateConstantsDirectory(
+      path.join(projectPath, 'src/lib/astronomy/constants')
+    );
+
+    // Convert SSOT violations to spec violations
+    const ssotViolations: SSOTViolation[] = [];
+    
+    // Convert duplicate definitions
+    for (const duplicate of duplicateDefinitions) {
+      ssotViolations.push({
+        specNumber: 'Spec-2',
+        violationType: ViolationType.SSOT_VIOLATION,
+        location: duplicate.authorityLocation,
+        description: `Duplicate definition of ${duplicate.concept.name}`,
+        governanceReference: 'Spec-2: SSOT 原则强制执行',
+        severity: duplicate.violationSeverity,
+        detectedAt: new Date(),
+        fixAttempts: 0,
+        concept: duplicate.concept,
+        authorityLocation: duplicate.authorityLocation,
+        duplicateLocations: duplicate.duplicateLocations
+      });
+    }
+
+    // Convert physics constant violations
+    for (const violation of physicsConstantViolations) {
+      ssotViolations.push({
+        specNumber: 'Spec-2',
+        violationType: ViolationType.SSOT_VIOLATION,
+        location: violation.location,
+        description: `Physics constant from non-authority source: ${violation.actualSource}`,
+        governanceReference: 'Spec-2: 物理常量必须从权威定义点获取',
+        severity: ViolationSeverity.HIGH,
+        detectedAt: new Date(),
+        fixAttempts: 0,
+        concept: {
+          name: violation.constantType,
+          type: this.mapConstantTypeToConceptType(violation.constantType),
+          authoritySource: violation.expectedSource,
+          allowedUsagePatterns: [],
+          forbiddenContexts: []
+        },
+        authorityLocation: { file: violation.expectedSource, line: 1, column: 1 },
+        duplicateLocations: [violation.location]
+      });
+    }
+
+    // Convert authority violations
+    for (const violation of authorityViolations) {
+      ssotViolations.push({
+        specNumber: 'Spec-2',
+        violationType: ViolationType.SSOT_VIOLATION,
+        location: violation.location,
+        description: `Physics concept defined outside authority: ${violation.concept.name}`,
+        governanceReference: 'Spec-2: 权威定义验证',
+        severity: ViolationSeverity.CRITICAL,
+        detectedAt: new Date(),
+        fixAttempts: 0,
+        concept: violation.concept,
+        authorityLocation: { file: violation.expectedAuthority, line: 1, column: 1 },
+        duplicateLocations: [violation.location]
+      });
+    }
+
     // Combine all violations
     const allViolations = [
       ...specViolations,
@@ -65,7 +137,7 @@ export class GovernanceAnalyzerImpl implements GovernanceAnalyzer {
 
     return {
       specViolations: allViolations,
-      ssotViolations: [], // Will be implemented in later tasks
+      ssotViolations,
       layerViolations: [], // Will be implemented in later tasks
       renderingViolations: [], // Will be implemented in later tasks
       magicNumbers: [], // Will be implemented in later tasks
@@ -803,5 +875,17 @@ export class GovernanceAnalyzerImpl implements GovernanceAnalyzer {
     return inappropriateAccess.some(rule => 
       fromLayer.includes(rule.from) && toLayer.includes(rule.to)
     );
+  }
+
+  private mapConstantTypeToConceptType(constantType: any): any {
+    // Map PhysicsConstantType to PhysicsConceptType
+    const mapping: Record<string, string> = {
+      'axialTilt': 'AXIAL_TILT',
+      'physicalParams': 'PHYSICAL_PARAMETER',
+      'rotation': 'ROTATION_PERIOD',
+      'referenceFrames': 'REFERENCE_FRAME'
+    };
+    
+    return mapping[constantType] || 'PHYSICAL_PARAMETER';
   }
 }
