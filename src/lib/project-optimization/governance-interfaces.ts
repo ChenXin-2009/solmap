@@ -246,12 +246,12 @@ export interface RefactoringRecommendation {
 
 // Architecture repair engine interface
 export interface ArchitectureRepairEngine {
-  repairSSOTViolations(violations: SSOTViolation[]): RepairResult;
-  fixLayerSeparation(violations: LayerViolation[]): RepairResult;
-  stupidifyRenderer(violations: RendererViolation[]): RepairResult;
-  eliminateMagicNumbers(violations: MagicNumberViolation[]): RepairResult;
-  triggerStructuralRefactoring(failures: StructuralFailure[]): RefactoringPlan;
-  validateRepair(original: ProjectAST, repaired: ProjectAST): ValidationResult;
+  repairSSOTViolations(violations: SSOTViolation[]): Promise<RepairResult>;
+  fixLayerSeparation(violations: LayerViolation[]): Promise<RepairResult>;
+  stupidifyRenderer(violations: RendererViolation[]): Promise<RepairResult>;
+  eliminateMagicNumbers(violations: MagicNumberViolation[]): Promise<RepairResult>;
+  triggerStructuralRefactoring(failures: StructuralFailure[]): Promise<RefactoringPlan>;
+  validateRepair(original: ProjectAST, repaired: ProjectAST): Promise<ValidationResult>;
 }
 
 export interface ValidationResult {

@@ -7,7 +7,6 @@ export * from './governance-config';
 // Implementation exports
 export { LayerSeparationValidator } from './layer-separation-validator';
 export { RendererStupidityCheckerImpl, createRendererStupidityChecker, extractRendererViolations } from './renderer-stupidity-checker';
-export { StructuralFailureDetector } from './structural-failure-detector';
 
 // Re-export specific types to avoid conflicts
 export type {

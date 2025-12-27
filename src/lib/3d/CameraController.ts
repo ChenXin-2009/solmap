@@ -82,10 +82,11 @@ export class CameraController {
     
     // 🐛 强制调试：显示当前配置
     console.log('🔧 CameraController 初始化 - 当前配置:', {
-      largeZoomMaxSpeed: this.currentConfig.largeZoomMaxSpeed,
-      smallZoomMaxSpeed: this.currentConfig.smallZoomMaxSpeed,
       zoomEasingSpeed: this.currentConfig.zoomEasingSpeed,
       zoomBaseFactor: this.currentConfig.zoomBaseFactor,
+      dampingFactor: this.currentConfig.dampingFactor,
+      focusLerpSpeed: this.currentConfig.focusLerpSpeed,
+      trackingLerpSpeed: this.currentConfig.trackingLerpSpeed,
       configSource: 'CameraConfigManager'
     });
     
@@ -703,10 +704,10 @@ export class CameraController {
     
     console.log('🔧 配置已应用到 CameraController:', {
       dampingFactor: config.dampingFactor,
-      largeZoomMaxSpeed: config.largeZoomMaxSpeed,
-      smallZoomMaxSpeed: config.smallZoomMaxSpeed,
       zoomEasingSpeed: config.zoomEasingSpeed,
-      zoomBaseFactor: config.zoomBaseFactor
+      zoomBaseFactor: config.zoomBaseFactor,
+      focusLerpSpeed: config.focusLerpSpeed,
+      trackingLerpSpeed: config.trackingLerpSpeed
     });
   }
 
