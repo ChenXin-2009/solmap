@@ -360,7 +360,8 @@ export default function SolarSystemCanvas3D() {
           const orbitColor = def ? def.color : body.color;
           const inclination = def ? def.i : 0;
           const Omega = def ? def.Omega : 0;
-          const orbit = new SatelliteOrbit(orbitRadius, orbitColor, 128, inclination, Omega);
+          const eclipticOrbit = def ? def.eclipticOrbit || false : false;
+          const orbit = new SatelliteOrbit(orbitRadius, orbitColor, 128, inclination, Omega, parentKey, eclipticOrbit);
           scene.add(orbit.getLine());
           orbitsRef.current.set(body.name.toLowerCase(), orbit as unknown as OrbitCurve);
         } else {
@@ -790,6 +791,9 @@ export default function SolarSystemCanvas3D() {
           try {
             // @ts-ignore
             orbit.updatePlanetPosition(parentPos);
+            
+            // 注意：轨道朝向在创建时已设置，不需要每帧更新
+            // 这避免了轨道持续旋转的问题
           } catch (err) {
             // 忽略错误
           }

@@ -13,6 +13,8 @@
  * - Meeus, Jean - Astronomical Algorithms (2nd Ed.)
  */
 
+import * as THREE from 'three';
+
 export interface OrbitalElements {
   name: string;
   // 轨道元素（J2000.0历元）
@@ -220,12 +222,13 @@ export const SATELLITE_DEFINITIONS: Record<string, Array<{
   radius: number;     // 半径（AU）
   color: string;
   phase?: number;
+  eclipticOrbit?: boolean;  // 是否相对于黄道面而非母行星赤道面
 }>> = {
   earth: [
     // 地球唯一天然卫星
     // 数据源：NASA JPL HORIZONS（2024）
-    // 月球轨道倾角相对于黄道面 ~5.14°
-    { name: 'Moon', a: 384400 / 149597870.7, periodDays: 27.322, i: 5.145 * Math.PI / 180, Omega: 0 * Math.PI / 180, radius: 1737.4 / 149597870.7, color: '#c0c0c0', phase: 0.0 },
+    // 月球轨道倾角相对于黄道面 ~5.14°（不是相对于地球赤道面）
+    { name: 'Moon', a: 384400 / 149597870.7, periodDays: 27.322, i: 5.145 * Math.PI / 180, Omega: 0 * Math.PI / 180, radius: 1737.4 / 149597870.7, color: '#c0c0c0', phase: 0.0, eclipticOrbit: true },
   ],
   jupiter: [
     // 木星的四颗伽利略卫星
@@ -392,6 +395,7 @@ export function getCelestialBodies(julianDay: number): CelestialBody[] {
 
   // 生成行星的卫星（简化轨道模型）
   // 使用圆形轨道，轨道中心为母天体当前位置，轨道半径使用 SATELLITE_DEFINITIONS 中的 a
+  // 🔧 关键修复：卫星位置计算考虑母行星轴倾角，确保与轨道平面渲染一致
   const planetPosMap: Record<string, { x: number; y: number; z: number }> = {};
   for (const b of bodies) {
     planetPosMap[b.name.toLowerCase()] = { x: b.x, y: b.y, z: b.z };
@@ -402,36 +406,90 @@ export function getCelestialBodies(julianDay: number): CelestialBody[] {
     const parentPos = planetPosMap[parentKey];
     if (!parentPos) continue;
 
+    // 🔧 获取母行星的轴倾角信息（从 CELESTIAL_BODIES 配置）
+    let parentAxisQuaternion = new THREE.Quaternion(); // 默认无倾角
+    
+    // 动态导入 CELESTIAL_BODIES 以获取母行星轴倾角
+    try {
+      const { CELESTIAL_BODIES } = require('@/lib/types/celestialTypes');
+      const parentConfig = CELESTIAL_BODIES[parentKey];
+      
+      if (parentConfig && parentConfig.orientation && parentConfig.orientation.spinAxis) {
+        const [x, y, z] = parentConfig.orientation.spinAxis;
+        
+        // 母行星自转轴向量（ICRF坐标系）
+        const spinAxisICRF = new THREE.Vector3(x, y, z);
+        
+        // 转换到渲染坐标系（ICRF -> Three.js）
+        const spinAxisRender = new THREE.Vector3(
+          spinAxisICRF.x,  // X 保持不变
+          spinAxisICRF.z,  // ICRF Z -> Render Y
+          -spinAxisICRF.y  // ICRF Y -> Render -Z
+        );
+        
+        // 🔧 修复：轨道平面在赤道面内，法向量是自转轴
+        const defaultNormal = new THREE.Vector3(0, 0, 1);  // 默认轨道平面法向量（Z轴）
+        const targetNormal = spinAxisRender.normalize();   // 目标法向量（自转轴方向）
+        
+        parentAxisQuaternion.setFromUnitVectors(defaultNormal, targetNormal);
+      }
+    } catch (error) {
+      console.warn(`Failed to get parent axis for ${parentKey}:`, error);
+    }
+
     for (const sat of sats) {
       // 计算平均角度（基于简化的固定周期）
       const theta = (2 * Math.PI * (daysSinceJ2000 / sat.periodDays + (sat.phase || 0))) % (2 * Math.PI);
 
-      // 卫星轨道坐标（在标准轨道面内）
+      // 卫星轨道坐标
       const r_orb = sat.a;  // 轨道半径
-      const x_orb = r_orb * Math.cos(theta);  // 轨道平面 X 坐标（升交点方向）
+      const x_orb = r_orb * Math.cos(theta);  // 轨道平面 X 坐标
       const y_orb = r_orb * Math.sin(theta);  // 轨道平面 Y 坐标
-      const z_orb = 0;                        // 轨道平面内 Z = 0（暂时在轨道平面内）
+      const z_orb = 0;                        // 轨道平面内 Z = 0
 
-      // ⚠️ 关键修复：正确的旋转顺序（欧拉角 Z-X-Z 约定）
-      // 第一步：绕 Z 轴旋转升交点黄经 (Ω)，使升交点指向正确的方向
-      const cos_Om = Math.cos(sat.Omega);
-      const sin_Om = Math.sin(sat.Omega);
-      const x_1 = x_orb * cos_Om - y_orb * sin_Om;
-      const y_1 = x_orb * sin_Om + y_orb * cos_Om;
-      const z_1 = z_orb;
+      let satellitePos: THREE.Vector3;
 
-      // 第二步：绕 X 轴旋转倾角 (i)，使轨道平面倾斜
-      const cos_i = Math.cos(sat.i);
-      const sin_i = Math.sin(sat.i);
-      const ox = x_1;
-      const oy = y_1 * cos_i - z_1 * sin_i;
-      const oz = y_1 * sin_i + z_1 * cos_i;
+      if (sat.eclipticOrbit) {
+        // 月球等：轨道相对于黄道面，不跟随母行星赤道面
+        // 直接在黄道坐标系中应用轨道倾角
+        const cos_Om = Math.cos(sat.Omega);
+        const sin_Om = Math.sin(sat.Omega);
+        const x_1 = x_orb * cos_Om - y_orb * sin_Om;
+        const y_1 = x_orb * sin_Om + y_orb * cos_Om;
+        const z_1 = z_orb;
+
+        const cos_i = Math.cos(sat.i);
+        const sin_i = Math.sin(sat.i);
+        const x_final = x_1;
+        const y_final = y_1 * cos_i - z_1 * sin_i;
+        const z_final = y_1 * sin_i + z_1 * cos_i;
+
+        satellitePos = new THREE.Vector3(x_final, y_final, z_final);
+      } else {
+        // 其他卫星：轨道在母行星赤道面内
+        // 应用卫星轨道倾角和升交点黄经（相对于母行星赤道面）
+        const cos_Om = Math.cos(sat.Omega);
+        const sin_Om = Math.sin(sat.Omega);
+        const x_1 = x_orb * cos_Om - y_orb * sin_Om;
+        const y_1 = x_orb * sin_Om + y_orb * cos_Om;
+        const z_1 = z_orb;
+
+        const cos_i = Math.cos(sat.i);
+        const sin_i = Math.sin(sat.i);
+        const x_2 = x_1;
+        const y_2 = y_1 * cos_i - z_1 * sin_i;
+        const z_2 = y_1 * sin_i + z_1 * cos_i;
+
+        // 应用母行星轴倾角变换
+        satellitePos = new THREE.Vector3(x_2, y_2, z_2);
+        satellitePos.applyQuaternion(parentAxisQuaternion);
+      }
 
       bodies.push({
         name: sat.name,
-        x: parentPos.x + ox,
-        y: parentPos.y + oy,
-        z: parentPos.z + oz,
+        x: parentPos.x + satellitePos.x,
+        y: parentPos.y + satellitePos.y,
+        z: parentPos.z + satellitePos.z,
         r: 0,
         radius: sat.radius,
         color: sat.color,
