@@ -51,7 +51,6 @@ export interface ViewState {
   position: [number, number, number]; // camera position
   time: number; // Julian Date
   timeSpeed: number;
-  viewMode: '2d' | '3d';
   zoom: number;
 }
 

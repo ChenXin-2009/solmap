@@ -41,7 +41,7 @@ export class SceneManager {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 限制最大像素比
     this.renderer.setClearColor(0x000000, 1); // 明确设置清除颜色为黑色
     
-    // ⚠️ 修复：在 Canvas 元素上设置 touchAction，而不是在容器上
+    // ⚠️ 修复：在 Canvas 元素上设置 touchAction，允许自定义触摸处理
     // 这样可以避免影响 fixed 定位的按钮（Firefox 特别敏感）
     this.renderer.domElement.style.touchAction = 'none';
     

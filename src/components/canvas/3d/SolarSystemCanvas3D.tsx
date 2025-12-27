@@ -1151,16 +1151,14 @@ export default function SolarSystemCanvas3D() {
         transition: 'opacity 1s ease-in-out',
       } as React.CSSProperties}
       onTouchStart={(e) => {
-        // 防止移动端缩放时页面滚动
-        if (e.touches.length > 1) {
-          e.preventDefault();
-        }
+        // 让相机控制器完全处理所有触摸事件
+        // 不在这里阻止默认行为，避免与相机控制器冲突
       }}
       onTouchMove={(e) => {
-        // 双指操作时防止页面滚动
-        if (e.touches.length > 1) {
-          e.preventDefault();
-        }
+        // 让相机控制器完全处理所有触摸事件
+      }}
+      onTouchEnd={(e) => {
+        // 让相机控制器完全处理所有触摸事件
       }}
     >
       <ScaleRuler 

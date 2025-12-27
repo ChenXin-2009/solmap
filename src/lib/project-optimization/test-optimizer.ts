@@ -7,10 +7,13 @@ import {
   ChangeType,
   IssueType,
   IssueSeverity,
-  SourceLocation,
+  SourceLocation
+} from './types';
+
+import {
   TestResult,
   CoverageResult
-} from './types';
+} from './interfaces';
 
 export interface TestOptimizationConfig {
   mergeDuplicateTests: boolean;

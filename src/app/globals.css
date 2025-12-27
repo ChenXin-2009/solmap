@@ -37,16 +37,16 @@ body {
   /* 全站默认使用思源宋体可变字体 */
   font-family: 'SourceHanSerifCN', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-weight: var(--font-weight-body);
-  /* 防止页面缩放 */
-  touch-action: none;
-  -ms-touch-action: none;
+  /* 允许触摸操作但防止页面滚动 */
+  touch-action: manipulation;
+  -ms-touch-action: manipulation;
   overflow: hidden;
 }
 
-/* 防止页面缩放 */
+/* 允许触摸操作但防止页面滚动 */
 html {
-  touch-action: none;
-  -ms-touch-action: none;
+  touch-action: manipulation;
+  -ms-touch-action: manipulation;
   overflow: hidden;
   position: fixed;
   width: 100%;

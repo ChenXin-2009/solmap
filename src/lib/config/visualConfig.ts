@@ -296,20 +296,20 @@ export const HEADER_CONFIG = {
 export const CAMERA_PENETRATION_CONFIG = {
   // 防穿透安全距离倍数：相对于行星半径的倍数。
   // 当相机距离 < 行星半径 * 此倍数时，触发防穿透约束
-  // 值越大，约束触发越早；设为 1.2 确保相机始终在表面外
-  safetyDistanceMultiplier: 1.6,
+  // 降低到1.5倍，允许更接近星球表面观察细节
+  safetyDistanceMultiplier: 1.5,
   
   // 防穿透约束的平滑过渡速度（0-1），用于平滑调整焦点位置
-  // 值越大约束响应越快，值越小约束更平缓。建议范围：0.05-0.3
-  constraintSmoothness: 0.25,
+  // 降低平滑度，减少约束对用户操作的干扰
+  constraintSmoothness: 0.15,
   
   // 约束应用时是否同时调整相机距离以避免跳跃
   // true：焦点和相机都调整；false：仅调整焦点
   adjustCameraDistance: true,
   
   // 当检测到穿透时是否立即强制修正位置（true 会把相机和焦点直接设置到安全位置以防止继续穿透）
-  // false 则使用平滑 lerp 过渡（可能在快速滚轮操作下无法完全阻止穿透）
-  forceSnap: true,
+  // 改为false，使用平滑过渡，避免突然跳跃
+  forceSnap: false,
   
   // 启用防穿透约束的调试模式
   // true：会在控制台打印约束触发和参数信息
@@ -334,12 +334,12 @@ export const CAMERA_ZOOM_CONFIG = {
   zoomSpeed: 1.5,
   
   // 基础缩放因子（滚轮缩放的基础倍数）
-  // 影响每次滚轮事件的缩放幅度。建议范围：0.2-0.6
-  zoomBaseFactor: 0.4,
+  // 降低缩放因子，使缩放更精细可控
+  zoomBaseFactor: 0.25,
   
   // 缩放缓动速度（0-1之间，越大越快）
-  // 用于平滑过渡缩放效果。建议范围：0.1-0.3
-  zoomEasingSpeed: 0.2,
+  // 大幅提高缓动速度，消除触摸缩放卡顿
+  zoomEasingSpeed: 0.65,
 };
 
 /**
@@ -348,20 +348,20 @@ export const CAMERA_ZOOM_CONFIG = {
  */
 export const CAMERA_FOCUS_CONFIG = {
   // 聚焦动画的插值速度（0-1，越大越快）
-  // 控制相机平滑移动到聚焦位置的速度。建议范围：0.1-0.3
-  focusLerpSpeed: 0.2,
+  // 提高聚焦速度，减少等待时间
+  focusLerpSpeed: 0.3,
   
   // 聚焦动画完成阈值（距离小于此值认为完成）
   // 用于判断聚焦动画是否完成。建议：0.001-0.05
   focusThreshold: 0.01,
   
   // 聚焦后初始相机距离相对于行星半径的倍数
-  // 值越大相机离行星越远。建议范围：3-8
-  focusDistanceMultiplier: 8,
+  // 降低初始距离，允许更接近观察
+  focusDistanceMultiplier: 5,
   
   // 防穿透时的最小距离倍数（相对于行星半径）
-  // 当相机缩放时不会穿过此距离。建议范围：0.1-0.5
-  minDistanceMultiplier: 1.2,
+  // 与CAMERA_PENETRATION_CONFIG保持一致
+  minDistanceMultiplier: 1.5,
 };
 
 /**
@@ -396,7 +396,7 @@ export const CAMERA_VIEW_CONFIG = {
   // 最小近平面距离（绝对值）
   // 防止近平面过小导致深度精度问题，但要足够小以支持极近距离观看
   // ⚠️ 关键参数：0.00001 = 10纳米级，足够支持接近观看
-  minNearPlane: 0.00001,
+  minNearPlane: 0.000001,
   
   // 最大远平面距离（绝对值）
   // 太阳系超大尺度需要很大的远平面。建议：1e10-1e12
@@ -410,11 +410,11 @@ export const CAMERA_VIEW_CONFIG = {
 export const CAMERA_OPERATION_CONFIG = {
   // 阻尼系数（0-1，值越小缓动越明显，惯性越强）
   // 控制相机旋转/平移的惯性效果。建议范围：0.01-0.1
-  dampingFactor: 0.04,
+  dampingFactor: 0.03,
   
   // 平移速度因子
   // 值越大鼠标/触摸平移越敏感。建议范围：0.3-1.0
-  panSpeed: 0.6,
+  panSpeed: 0.8,
   
   // 旋转速度因子
   // 值越大鼠标/触摸旋转越敏感。建议范围：0.5-1.5
@@ -426,7 +426,7 @@ export const CAMERA_OPERATION_CONFIG = {
   
   // 方位角平滑过渡速度（0-1，越大越快）
   // 用于平滑调整相机的左右视角。建议范围：0.05-0.15
-  azimuthalAngleTransitionSpeed: 0.08,
+  azimuthalAngleTransitionSpeed: 0.1,
 };
 
 /**
@@ -564,19 +564,6 @@ export const TEXTURE_STRATEGY_CONSTRAINTS = {
    */
   ALLOWED_RESOLUTIONS: ['2k', '4k'] as const,
   
-  /**
-   * ❌ 明确禁止的功能（Phase 1）
-   * 这些功能在 Phase 1 期间绝对不实现
-   */
-  FORBIDDEN_FEATURES: [
-    '8k_textures',      // 8K 分辨率 - 内存开销过大
-    'normal_maps',      // 法线贴图 - 增加复杂度
-    'height_maps',      // 高程贴图 - 增加复杂度
-    'specular_maps',    // 高光贴图 - 增加复杂度
-    'auto_download',    // 自动下载贴图 - 网络依赖
-    'svg_textures',     // SVG/矢量贴图 - 不适用
-    'terrain_detail',   // 地形细节 - 超出范围
-  ] as const,
   
   /**
    * ✅ 已实现的功能（Phase 1）
@@ -728,12 +715,12 @@ export const PLANET_LIGHTING_CONFIG = {
   // 向阳面的最大亮度（防止过曝）
   // 范围：0.5-2.0，1.0 = 原始贴图亮度
   // 建议：0.9-1.2
-  maxDaylightIntensity: 1.1,
+  maxDaylightIntensity: 1.3,
   
   // 背阳面的最小亮度
   // 范围：0-0.2，0 = 完全黑暗
   // 建议：0.01-0.05
-  minNightIntensity: 0.02,
+  minNightIntensity: 0.05,
   
   // 对比度增强系数
   // 范围：0.5-2.0，1.0 = 无变化，>1 = 增加对比度
@@ -830,7 +817,7 @@ export const CELESTIAL_MATERIAL_PARAMS: Record<string, CelestialMaterialParams> 
   
   // Mercury - 极端岩石，无大气，硬阴影
   mercury: {
-    ambientIntensity: 0.02,
+    ambientIntensity: 0.04,
     terminatorWidth: 0.06,
     contrastBoost: 1.6,
     saturationBoost: 0.9,

@@ -53,7 +53,7 @@ export class CameraController {
   private wheelHandler: ((e: WheelEvent) => void) | null = null;
   private touchStartHandler: ((e: TouchEvent) => void) | null = null;
   private touchMoveHandler: ((e: TouchEvent) => void) | null = null;
-  private touchEndHandler: (() => void) | null = null;
+  private touchEndHandler: ((e: TouchEvent) => void) | null = null;
   private domElement: HTMLElement;
   
   // 聚焦相关
@@ -423,9 +423,12 @@ export class CameraController {
     
     let initialDistance = 0;
     let initialSmoothDistance = 0;
+    let isPinching = false; // 添加缩放状态标记
+    let lastUpdateTime = 0; // 添加更新时间控制，优化性能
 
     this.touchStartHandler = (e: TouchEvent) => {
       if (e.touches.length === 2) {
+        e.preventDefault(); // 阻止默认的缩放行为
         const touch1 = e.touches[0];
         const touch2 = e.touches[1];
         initialDistance = Math.sqrt(
@@ -433,21 +436,56 @@ export class CameraController {
           Math.pow(touch2.clientY - touch1.clientY, 2)
         );
         initialSmoothDistance = this.smoothDistance;
-      }
-    };
-
-    this.touchMoveHandler = (e: TouchEvent) => {
-      if (e.touches.length === 2 && initialDistance > 0) {
-        // 如果正在聚焦或跟踪，立即停止
+        isPinching = true;
+        lastUpdateTime = performance.now(); // 重置更新时间
+        
+        // ⚠️ 关键修复：双指缩放时的处理逻辑与滚轮保持一致
+        // 如果正在聚焦，立即停止聚焦但允许缩放
         if (this.isFocusing) {
           this.isFocusing = false;
           this.targetCameraPosition = null;
           this.targetControlsTarget = null;
+          // 同步当前距离，确保缩放从当前位置开始
+          const currentDist = this.camera.position.distanceTo(this.controls.target);
+          if (isFinite(currentDist) && currentDist > 0) {
+            this.smoothDistance = currentDist;
+            this.targetDistance = currentDist;
+          }
+          // 重置最小距离（允许用户自由缩放）
           this.resetMinDistance();
         }
+        
+        // ⚠️ 关键修复：不要停止跟踪，允许在跟踪的同时缩放
+        // 如果正在跟踪，同步当前距离（使用 smoothDistance 如果存在，否则使用实际距离）
         if (this.isTracking) {
-          this.stopTracking();
+          const currentDist = this.smoothDistance || this.camera.position.distanceTo(this.controls.target);
+          if (isFinite(currentDist) && currentDist > 0) {
+            this.smoothDistance = currentDist;
+            this.targetDistance = currentDist;
+            // 同步 trackingDistance，确保跟踪逻辑使用正确的距离
+            this.trackingDistance = currentDist;
+          }
         }
+        
+        // 确保缩放功能启用
+        this.isZooming = true;
+      } else {
+        // 非双指触摸时重置缩放状态
+        isPinching = false;
+        initialDistance = 0;
+      }
+    };
+
+    this.touchMoveHandler = (e: TouchEvent) => {
+      if (e.touches.length === 2 && isPinching && initialDistance > 0) {
+        e.preventDefault(); // 阻止默认的缩放行为
+        
+        // ⚠️ 性能优化：限制更新频率，避免过于频繁的计算
+        const currentTime = performance.now();
+        if (currentTime - lastUpdateTime < 16) { // 限制为60fps
+          return;
+        }
+        lastUpdateTime = currentTime;
         
         const touch1 = e.touches[0];
         const touch2 = e.touches[1];
@@ -456,20 +494,53 @@ export class CameraController {
           Math.pow(touch2.clientY - touch1.clientY, 2)
         );
         
-        const scale = currentDistance / initialDistance;
-        // 手指张开（scale > 1）应该放大（减小距离），手指合拢（scale < 1）应该缩小（增大距离）
-        // 所以应该是 initialSmoothDistance / scale（与鼠标滚轮逻辑一致）
-        // 不再受限于 controls.minDistance，允许更接近目标
-        this.targetDistance = Math.max(
-          0,
-          Math.min(this.controls.maxDistance, initialSmoothDistance / scale)
-        );
-        this.isZooming = true;
+        // 添加最小距离检查，避免除零错误
+        if (currentDistance > 10 && initialDistance > 10) {
+          const scale = currentDistance / initialDistance;
+          
+          // ⚠️ 关键修复：使用更激进的触摸缩放算法，提供明显的缩放效果
+          // 计算缩放增量，模拟滚轮的行为
+          const scaleDiff = scale - 1.0;
+          
+          // 使用指数放大来增强小幅度的手指移动
+          // 这样即使很小的手指移动也能产生明显的缩放效果
+          let zoomDelta;
+          if (Math.abs(scaleDiff) > 0.001) {
+            // 使用指数函数来放大小的变化
+            const sign = scaleDiff > 0 ? 1 : -1;
+            const absScaleDiff = Math.abs(scaleDiff);
+            // 使用平方根函数来放大小变化，但限制大变化
+            zoomDelta = sign * Math.sqrt(absScaleDiff) * 3; // 大幅增加敏感度
+          } else {
+            zoomDelta = 0;
+          }
+          
+          // 限制单次缩放的最大幅度，但允许更大的范围
+          zoomDelta = Math.max(-6, Math.min(6, zoomDelta)); // 进一步增加到±6
+          
+          // 使用与滚轮相同的zoom方法
+          this.zoom(zoomDelta);
+          
+          // 更新初始距离，实现连续缩放
+          initialDistance = currentDistance;
+          // 同步 initialSmoothDistance 以保持一致性
+          initialSmoothDistance = this.smoothDistance;
+        }
+      } else if (e.touches.length !== 2) {
+        // 触摸点数量变化时重置缩放状态
+        isPinching = false;
+        initialDistance = 0;
       }
     };
 
-    this.touchEndHandler = () => {
-      initialDistance = 0;
+    this.touchEndHandler = (e: TouchEvent) => {
+      // 完整重置所有缩放相关状态
+      if (e.touches.length < 2) {
+        isPinching = false;
+        initialDistance = 0;
+        initialSmoothDistance = 0;
+        lastUpdateTime = 0;
+      }
     };
 
     domElement.addEventListener('touchstart', this.touchStartHandler, { passive: false });
@@ -641,14 +712,14 @@ export class CameraController {
 
     // Calculate penetration severity for adaptive response
     const penetrationRatio = penetrationDepth / minAllowedFromCenter;
-    const isDeepPenetration = penetrationRatio > 0.5;
+    const isDeepPenetration = penetrationRatio > 0.7; // 提高深度穿透阈值
 
     // 计算安全的相机位置（保持当前方向，但调整距离）
     const dirNorm = dir.length() > 1e-6 ? dir.normalize() : new THREE.Vector3(0, 1, 0);
     
     // ⚠️ 关键修复：只调整相机位置，不修改 controls.target
     // 这样用户仍然可以自由旋转视角，只是不能穿透星球
-    if (CAMERA_PENETRATION_CONFIG.forceSnap || isDeepPenetration) {
+    if (CAMERA_PENETRATION_CONFIG.forceSnap && isDeepPenetration) {
       // 立即修正：直接设置相机位置到安全距离
       const safeDistance = Math.max(minAllowedFromCenter, this.smoothDistance || minAllowedFromCenter);
       const safeCamPos = center.clone().add(dirNorm.clone().multiplyScalar(safeDistance));
@@ -665,7 +736,7 @@ export class CameraController {
     } else {
       // 平滑修正：逐渐将相机移动到安全距离
       const baseSmoothness = CAMERA_PENETRATION_CONFIG.constraintSmoothness;
-      const adaptiveSmoothness = baseSmoothness * (1 + penetrationRatio * 2);
+      const adaptiveSmoothness = baseSmoothness * (1 + penetrationRatio);
       const factor = Math.min(1, adaptiveSmoothness * Math.max(0.0001, deltaTime * 60));
       
       const easedFactor = this.easeOutQuart(factor);
@@ -736,8 +807,10 @@ export class CameraController {
   stopTracking() {
     this.isTracking = false;
     this.trackingTargetGetter = null;
-    // 重置最小距离到默认值
-    this.resetMinDistance();
+    // 在双指缩放时不重置最小距离，避免相机跳跃
+    if (!this.isZooming) {
+      this.resetMinDistance();
+    }
   }
 
   // 手动缩放方法（带平滑效果和增强的防穿透）
@@ -747,7 +820,7 @@ export class CameraController {
       this.isFocusing = false;
       this.targetCameraPosition = null;
       this.targetControlsTarget = null;
-      this.resetMinDistance();
+      // 在缩放时不重置最小距离，避免相机跳跃
     }
     
     // ⚠️ 关键修复：缩放时不要停止跟踪，而是让跟踪使用缩放后的距离
@@ -764,9 +837,9 @@ export class CameraController {
       return;
     }
     
-    // 计算缩放因子（类似2D版本，根据滚动速度调整）
+    // 计算缩放因子（更精细的控制）
     const baseFactor = CAMERA_CONFIG.zoomBaseFactor;
-    const scrollSpeed = Math.min(Math.abs(delta), 3); // 限制最大滚动速度影响
+    const scrollSpeed = Math.min(Math.abs(delta), 2); // 限制最大滚动速度影响
     // delta > 0 表示放大（拉近），delta < 0 表示缩小（拉远）
     // 在3D中，delta > 0 应该减小距离（拉近相机），delta < 0 应该增加距离（拉远相机）
     const zoomFactor = delta > 0 
@@ -792,7 +865,7 @@ export class CameraController {
     
     // 更新目标距离（限制在合理范围内）
     this.targetDistance = Math.max(
-      0,
+      CAMERA_CONFIG.minDistance,
       Math.min(this.controls.maxDistance, newTargetDistance)
     );
     
@@ -1039,11 +1112,15 @@ export class CameraController {
     if (this.isZooming) {
       const distanceDiff = this.targetDistance - this.smoothDistance;
       
-      if (Math.abs(distanceDiff) > 0.01) {
+      // ⚠️ 性能优化：降低完成阈值，让缩放更快完成，减少卡顿
+      if (Math.abs(distanceDiff) > 0.001) { // 从0.01降低到0.001
         // 使用缓动函数实现平滑过渡（ease-out），与2D版本一致
         // 使用更快的缓动速度，让缩放更流畅
         const speed = CAMERA_CONFIG.zoomEasingSpeed;
-        this.smoothDistance += distanceDiff * speed;
+        
+        // ⚠️ 关键优化：使用自适应缓动速度，距离目标越近速度越快
+        const adaptiveSpeed = Math.min(0.8, speed * (1 + Math.abs(distanceDiff) / this.smoothDistance));
+        this.smoothDistance += distanceDiff * adaptiveSpeed;
         
         // 如果正在跟踪，更新跟踪距离（让跟踪逻辑使用缩放后的距离）
         if (this.isTracking) {

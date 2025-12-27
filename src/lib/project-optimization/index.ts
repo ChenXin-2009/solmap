@@ -8,3 +8,6 @@ export * from './generator';
 export * from './validator';
 export * from './config';
 export * from './documentation-optimizer';
+
+// Governance compliance modules (separate to avoid conflicts)
+export * as Governance from './governance-index';

@@ -37,7 +37,6 @@ export interface SolarSystemState {
   // ========== 视图状态 ==========
   viewOffset: ViewOffset;
   zoom: number;
-  viewMode: '2d' | '3d'; // 视图模式
 
   // ========== 语言 ==========
   lang: Language;               // 当前语言
@@ -53,7 +52,6 @@ export interface SolarSystemState {
   selectPlanet: (name: string | null) => void;
   setViewOffset: (offset: ViewOffset) => void;
   setZoom: (zoom: number) => void;
-  setViewMode: (mode: '2d' | '3d') => void;
   centerOnPlanet: (name: string) => void;
   resetToNow: () => void;
   resetView: () => void;
@@ -83,7 +81,6 @@ export const useSolarSystemStore = create<SolarSystemState>((set, get) => {
     selectedPlanet: null,
     viewOffset: { x: 0, y: 0 },
     zoom: DEFAULT_ZOOM,
-    viewMode: '3d', // 默认3D模式
     
     // ========== 语言 ==========
     lang: 'zh', // 默认中文
@@ -146,8 +143,6 @@ export const useSolarSystemStore = create<SolarSystemState>((set, get) => {
       const clampedZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
       set({ zoom: clampedZoom });
     },
-    
-    setViewMode: (mode: '2d' | '3d') => set({ viewMode: mode }),
     
     centerOnPlanet: (name: string) => {
       const state = get();

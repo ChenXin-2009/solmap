@@ -8,6 +8,7 @@
  */
 
 import { Vector3 } from 'three';
+import * as THREE from 'three';
 import { CanonicalAxisDebugger } from './debug-canonical-axis';
 import { AxisVisualizationDebugger } from './axis-visualization-debug';
 import type { Vector3 as AxialTiltVector3 } from './types';

@@ -5,9 +5,9 @@
  */
 
 import { Vector3 } from 'three';
-import { createMeshOrientationManager, MeshOrientationManager } from './mesh-orientation-manager';
-import { createFrameTransformer, FrameTransformer } from './frame-transformer';
-import { ModelConfig, DEFAULT_MODEL_CONFIG } from './types';
+import { createMeshOrientationManager } from './mesh-orientation-manager';
+import { createFrameTransformer } from './frame-transformer';
+import { ModelConfig, DEFAULT_MODEL_CONFIG, MeshOrientationManager, FrameTransformer } from './types';
 
 export interface CanonicalAxisDebugConfig {
   mode: 'canonical' | 'physical';

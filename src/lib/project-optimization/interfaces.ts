@@ -10,15 +10,11 @@ import {
   ArchitectureIssue,
   DeadCodeIssue,
   ConfigurationIssue,
+  DocumentationIssue,
   OptimizationResult,
   CodeChange,
-  ValidationResult,
-  PerformanceComparison,
-  ArchitectureValidation,
-  TestResult,
-  GeneratedCode,
-  ArchitectureRule,
-  BackupInfo
+  OptimizationConfig,
+  OptimizationMetrics
 } from './types';
 
 // Core analyzer interface
@@ -194,6 +190,66 @@ export interface ArchitectureRule {
   enabled: boolean;
 }
 
+export interface AnalysisReport {
+  summary: AnalysisSummary;
+  issues: IssuesByType;
+  metrics: CodeMetrics;
+  recommendations: Recommendation[];
+  timestamp: Date;
+}
+
+export interface AnalysisSummary {
+  filesAnalyzed: number;
+  issuesFound: number;
+  criticalIssues: number;
+  estimatedEffort: number;
+}
+
+export interface IssuesByType {
+  duplication: DuplicationIssue[];
+  performance: PerformanceIssue[];
+  architecture: ArchitectureIssue[];
+  deadCode: DeadCodeIssue[];
+  configuration: ConfigurationIssue[];
+  documentation: DocumentationIssue[];
+}
+
+export interface Recommendation {
+  priority: 'high' | 'medium' | 'low';
+  category: string;
+  description: string;
+  effort: 'low' | 'medium' | 'high';
+  impact: 'low' | 'medium' | 'high';
+}
+
+export interface OptimizationReport {
+  summary: OptimizationSummary;
+  results: OptimizationResult[];
+  metrics: OptimizationMetrics;
+  timestamp: Date;
+}
+
+export interface OptimizationSummary {
+  totalOptimizations: number;
+  successfulOptimizations: number;
+  failedOptimizations: number;
+  timeElapsed: number;
+}
+
+export interface SummaryReport {
+  before: CodeMetrics;
+  after: CodeMetrics;
+  improvements: ImprovementMetrics;
+  recommendations: string[];
+}
+
+export interface ImprovementMetrics {
+  duplicationsReduced: number;
+  deadCodeRemoved: number;
+  performanceGains: number;
+  maintainabilityImproved: number;
+}
+
 export interface BackupInfo {
   id: string;
   timestamp: Date;
@@ -214,25 +270,13 @@ export interface BackupMetadata {
   fileCount: number;
 }
 
-export interface OptimizationConfig {
-  enabled: boolean;
-  rules: OptimizationRule[];
-  thresholds: OptimizationThresholds;
-  exclusions: string[];
-}
-
-export interface OptimizationRule {
+export interface ArchitectureRule {
   name: string;
-  type: OptimizationType;
-  severity: RuleSeverity;
-  parameters: Record<string, any>;
-}
-
-export interface OptimizationThresholds {
-  duplicationSimilarity: number;
-  complexityLimit: number;
-  fileSizeLimit: number;
-  functionLengthLimit: number;
+  description: string;
+  pattern: string | RegExp;
+  violation: string;
+  severity: 'error' | 'warning';
+  enabled: boolean;
 }
 
 export interface AnalysisReport {
@@ -308,6 +352,3 @@ import {
   RuleSeverity,
   SourceLocation
 } from './types';
-
-// Import documentation types
-import { DocumentationIssue } from './documentation-optimizer';

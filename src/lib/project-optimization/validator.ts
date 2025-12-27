@@ -1,13 +1,13 @@
 // Validator implementation - placeholder for future implementation
 import { Validator } from './interfaces';
+import { ProjectAST } from './types';
 import { 
-  ProjectAST, 
   ValidationResult, 
   PerformanceComparison, 
   ArchitectureValidation, 
   TestResult,
   ArchitectureRule 
-} from './types';
+} from './interfaces';
 
 export class ProjectValidator implements Validator {
   validateFunctionality(original: ProjectAST, optimized: ProjectAST): ValidationResult {

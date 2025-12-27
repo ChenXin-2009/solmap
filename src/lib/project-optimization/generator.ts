@@ -1,6 +1,7 @@
 // Code generator implementation - placeholder for future implementation
 import { CodeGenerator } from './interfaces';
-import { CodeChange, GeneratedCode, ValidationResult } from './types';
+import { CodeChange } from './types';
+import { GeneratedCode, ValidationResult } from './interfaces';
 
 export class TypeScriptCodeGenerator implements CodeGenerator {
   generateCode(changes: CodeChange[]): GeneratedCode {

@@ -10,26 +10,10 @@ import {
   MethodDeclaration,
   OptimizationResult,
   CodeChange,
-  ChangeType
+  ChangeType,
+  DocumentationIssue,
+  DocumentationType
 } from './types';
-
-export interface DocumentationIssue extends Issue {
-  type: IssueType.DOCUMENTATION;
-  documentationType: DocumentationType;
-  expectedDocumentation?: string;
-  currentDocumentation?: string;
-}
-
-export enum DocumentationType {
-  MISSING_FUNCTION_DOC = 'missing_function_doc',
-  MISSING_CLASS_DOC = 'missing_class_doc',
-  MISSING_METHOD_DOC = 'missing_method_doc',
-  OUTDATED_COMMENT = 'outdated_comment',
-  INCONSISTENT_COMMENT = 'inconsistent_comment',
-  INVALID_EXAMPLE = 'invalid_example',
-  MISSING_PARAM_DOC = 'missing_param_doc',
-  MISSING_RETURN_DOC = 'missing_return_doc'
-}
 
 export interface DocumentationSyncResult {
   commentConsistencyIssues: DocumentationIssue[];
