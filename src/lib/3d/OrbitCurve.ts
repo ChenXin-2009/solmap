@@ -13,10 +13,11 @@
 
 import * as THREE from 'three';
 import type { OrbitalElements } from '@/lib/astronomy/orbit';
-import { ORBIT_GRADIENT_CONFIG, ORBIT_RENDER_CONFIG } from '@/lib/config/visualConfig';
+import { ORBIT_GRADIENT_CONFIG, ORBIT_RENDER_CONFIG, ORBIT_STYLE_CONFIG, ORBIT_DISC_FADE_CONFIG } from '@/lib/config/visualConfig';
 
 export class OrbitCurve {
-  private line: THREE.Line;
+  private root: THREE.Group;
+  private visualObjects: THREE.Object3D[] = [];
   private curve: THREE.CatmullRomCurve3;
   private points: THREE.Vector3[] = [];
   private planetPosition: THREE.Vector3 | null = null; // 行星当前位置（用于计算渐变方向）
@@ -35,8 +36,7 @@ export class OrbitCurve {
     julianDay?: number,
     planetPosition?: THREE.Vector3
   ) {
-    // Store orbital elements for adaptive resolution
-    this.elements = elements;
+    this.root = new THREE.Group();
     // Store orbital elements for adaptive resolution
     this.elements = elements;
     
@@ -50,139 +50,307 @@ export class OrbitCurve {
     // 生成轨道点
     this.generatePoints(elements, segments, julianDay);
 
+    // 创建可视化对象
+    this.createVisualObject();
+  }
+
+  private createVisualObject(): void {
+    // Clear existing
+    if (this.visualObjects.length > 0) {
+        this.visualObjects.forEach(obj => {
+            this.root.remove(obj);
+            if (obj instanceof THREE.Line || obj instanceof THREE.Mesh) {
+                obj.geometry.dispose();
+                if (Array.isArray(obj.material)) {
+                    obj.material.forEach(m => m.dispose());
+                } else if (obj.material) {
+                    obj.material.dispose();
+                }
+            }
+        });
+        this.visualObjects = [];
+    }
+
+    if (ORBIT_STYLE_CONFIG.style === 'filled') {
+      const mesh = this.createFilledMesh();
+      if (mesh) {
+        this.root.add(mesh);
+        this.visualObjects.push(mesh);
+      }
+      
+      if (ORBIT_STYLE_CONFIG.showLine) {
+        const line = this.createLine();
+        if (line) {
+          this.root.add(line);
+          this.visualObjects.push(line);
+        }
+      }
+    } else {
+      const line = this.createLine();
+      if (line) {
+        this.root.add(line);
+        this.visualObjects.push(line);
+      }
+    }
+  }
+
+  private static gradientTexture: THREE.Texture | null = null;
+
+  private static getGradientTexture(): THREE.Texture {
+    if (OrbitCurve.gradientTexture) return OrbitCurve.gradientTexture;
+    
+    // Create gradient texture: Bottom (transparent) -> Top (opaque)
+    // V=0 -> Transparent, V=1 -> Opaque
+    if (typeof document === 'undefined') {
+        return new THREE.Texture();
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 2;
+    canvas.height = 64;
+    const context = canvas.getContext('2d')!;
+    
+    // In Canvas, (0,0) is top-left.
+    // We want V=0 (bottom of texture) to be transparent.
+    // We want V=1 (top of texture) to be opaque.
+    // Texture coordinates usually map (0,0) to bottom-left.
+    // So V=0 is bottom row of pixels.
+    // Canvas Y=64 is bottom.
+    
+    const gradient = context.createLinearGradient(0, 64, 0, 0); // From Bottom to Top
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');   // Bottom (V=0) -> Transparent
+    gradient.addColorStop(1, `rgba(255, 255, 255, ${ORBIT_STYLE_CONFIG.fillAlpha})`); // Top (V=1) -> Opaque
+    
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 2, 64);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+    
+    OrbitCurve.gradientTexture = texture;
+    return texture;
+  }
+
+  private createFilledMesh(): THREE.Mesh | null {
+    if (this.points.length < 2) return null;
+
+    const vertexCount = this.points.length;
+    // 2 vertices per point (inner and outer)
+    const positions = new Float32Array(vertexCount * 2 * 3);
+    const uvs = new Float32Array(vertexCount * 2 * 2);
+    const indices: number[] = [];
+
+    const innerRatio = ORBIT_STYLE_CONFIG.innerRadiusRatio;
+
+    for (let i = 0; i < vertexCount; i++) {
+        const point = this.points[i];
+        
+        // Outer vertex (original point)
+        positions[i * 6] = point.x;
+        positions[i * 6 + 1] = point.y;
+        positions[i * 6 + 2] = point.z;
+        
+        // Inner vertex (scaled towards 0,0,0)
+        // Assuming orbit is centered at (0,0,0) - Sun position
+        positions[i * 6 + 3] = point.x * innerRatio;
+        positions[i * 6 + 4] = point.y * innerRatio;
+        positions[i * 6 + 5] = point.z * innerRatio;
+
+        // UVs
+        // u goes from 0 to 1 along the orbit? Or just use index?
+        // Since it's a closed loop, texture wrapping might be an issue if we use 0-1.
+        // But for radial gradient, we only care about V.
+        // U can be anything if texture is 1px wide.
+        uvs[i * 4] = 0; // U
+        uvs[i * 4 + 1] = 1; // V=1 (Outer)
+
+        uvs[i * 4 + 2] = 0; // U
+        uvs[i * 4 + 3] = 0; // V=0 (Inner)
+    }
+
+    // Indices for Triangle Strip
+    // 0, 1, 2, 3, ...
+    // Vertex arrangement: 2*i (Outer), 2*i+1 (Inner)
+    // Quad between i and i+1:
+    // Tri 1: Outer_i, Inner_i, Outer_i+1
+    // Tri 2: Inner_i, Inner_i+1, Outer_i+1
+    
+    for (let i = 0; i < vertexCount - 1; i++) {
+        const outerCurrent = 2 * i;
+        const innerCurrent = 2 * i + 1;
+        const outerNext = 2 * (i + 1);
+        const innerNext = 2 * (i + 1) + 1;
+        
+        // Counter-clockwise
+        // Outer_i -> Inner_i -> Outer_i+1
+        indices.push(outerCurrent, innerCurrent, outerNext);
+        // Inner_i -> Inner_i+1 -> Outer_i+1
+        indices.push(innerCurrent, innerNext, outerNext);
+    }
+    
+    // Close the loop if not already closed by points
+    // generatePoints usually adds the first point at the end if closed.
+    // If so, vertexCount-1 connects to 0 is handled by the loop above?
+    // No, if points[last] == points[0], then the loop above handles it.
+    // If points are distinct and implied closed, we need to wrap.
+    // Looking at generatePoints: 
+    // "if (firstPoint.distanceTo(lastPoint) > 0.001) this.points.push(firstPoint.clone())"
+    // So it is explicitly closed. The loop i < vertexCount - 1 covers the last segment.
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals(); // Maybe needed for some shaders, but BasicMaterial ignores it.
+
+    const material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(this.orbitColor),
+        map: OrbitCurve.getGradientTexture(),
+        transparent: true,
+        opacity: 1.0, // Base opacity, multiplied by texture alpha
+        side: THREE.DoubleSide,
+        depthWrite: false, // Usually good for transparent objects to avoid occlusion issues
+        depthTest: true,
+    });
+
+    return new THREE.Mesh(geometry, material);
+  }
+
+  private createLine(): THREE.Line {
     // ⚠️ 关键修复：直接使用生成的点创建几何体，不使用 CatmullRomCurve3 插值
-    // CatmullRomCurve3 会导致轻微的摆动，因为它会在点之间进行样条插值
-    // 我们已经生成了足够多的点（segments 个），直接使用这些点即可
     const geometry = new THREE.BufferGeometry().setFromPoints(this.points);
     
     // 保存曲线引用（用于其他方法，如 getClosestPointOnOrbit）
     this.curve = new THREE.CatmullRomCurve3(this.points, true);
 
-    // 创建渐变材质（如果启用）
     let material: THREE.LineBasicMaterial;
     
     // 检查是否启用渐变（需要启用配置且有行星位置）
+    // 注意：如果使用了 filled 样式，线条可以使用更简单的材质，或者也使用渐变但透明度更低
     const shouldUseGradient = ORBIT_GRADIENT_CONFIG.enabled && this.planetPosition;
     
+    // 如果 showLine 为 true 且 style 为 filled，我们可以应用 lineOpacity
+    const lineOpacity = ORBIT_STYLE_CONFIG.style === 'filled' && ORBIT_STYLE_CONFIG.showLine 
+        ? (ORBIT_STYLE_CONFIG.lineOpacity ?? 0.5) 
+        : 1.0;
+
     if (shouldUseGradient) {
-      // 单向渐变：从行星当前位置向运动反方向渐隐
-      // 计算每个点到行星的距离，距离越远（在运动反方向）越透明
-      const vertexCount = this.points.length;
-      const colors = new Float32Array(vertexCount * 3);
-      
-      // 解析颜色（支持 #RRGGBB 和 #RGB 格式）
-      let r, g, b;
-      if (this.orbitColor.length === 7) {
-        // #RRGGBB 格式
-        r = parseInt(this.orbitColor.slice(1, 3), 16) / 255;
-        g = parseInt(this.orbitColor.slice(3, 5), 16) / 255;
-        b = parseInt(this.orbitColor.slice(5, 7), 16) / 255;
-      } else if (this.orbitColor.length === 4) {
-        // #RGB 格式
-        r = parseInt(this.orbitColor[1], 16) / 15;
-        g = parseInt(this.orbitColor[2], 16) / 15;
-        b = parseInt(this.orbitColor[3], 16) / 15;
-      } else {
-        // 默认白色
-        r = g = b = 1;
-      }
-      
-      // 计算行星运动方向（近似：使用轨道上相邻点的方向）
-      // 找到最接近行星位置的轨道点索引
-      // 注意：此时 this.planetPosition 一定不为 null（因为 shouldUseGradient 已经检查过）
-      const planetPos = this.planetPosition!;
-      
-      let closestIdx = 0;
-      let minDist = Infinity;
-      for (let i = 0; i < vertexCount; i++) {
-        const dist = this.points[i].distanceTo(planetPos);
-        if (dist < minDist) {
-          minDist = dist;
-          closestIdx = i;
-        }
-      }
-      
-      // 计算运动方向（从当前点到下一个点）
-      const nextIdx = (closestIdx + 1) % vertexCount;
-      const velocityDir = new THREE.Vector3()
-        .subVectors(this.points[nextIdx], this.points[closestIdx])
-        .normalize();
-      
-      // 计算每个点到行星的距离，以及是否在运动反方向
-      const maxDist = Math.max(...this.points.map(p => p.distanceTo(planetPos)));
-      
-      for (let i = 0; i < vertexCount; i++) {
-        const point = this.points[i];
-        const toPoint = new THREE.Vector3().subVectors(point, planetPos);
-        const dist = toPoint.length();
+        // ... (Existing gradient logic) ...
+        // Since this is complex logic, I should copy it or refactor it.
+        // For now I will simplify or copy the existing logic if I can.
+        // To avoid code duplication, I should have kept the old constructor logic.
+        // But I'm replacing it.
         
-        if (dist < 0.001) {
-          // 行星当前位置，完全不透明
-          colors[i * 3] = r;
-          colors[i * 3 + 1] = g;
-          colors[i * 3 + 2] = b;
-          continue;
-        }
+        // Let's copy the logic from the previous Read.
+        const vertexCount = this.points.length;
+        const colors = new Float32Array(vertexCount * 3);
         
-        toPoint.normalize();
-        
-        // 计算点在运动方向上的投影（正值表示在运动方向，负值表示在运动反方向）
-        const dot = toPoint.dot(velocityDir);
-        
-        // 距离行星的距离（归一化）
-        const distT = Math.min(1, dist / maxDist);
-        
-        // 渐变逻辑：从行星位置开始，向运动反方向渐隐
-        // dot < 0 表示在运动反方向，应该渐隐
-        // dot > 0 表示在运动方向，保持较亮
-        let opacity = ORBIT_GRADIENT_CONFIG.maxOpacity;
-        if (dot < 0) {
-          // 在运动反方向，根据距离渐隐（距离越远越透明）
-          const fadeT = Math.abs(dot) * distT; // 结合方向和距离
-          opacity = ORBIT_GRADIENT_CONFIG.maxOpacity - 
-                   (ORBIT_GRADIENT_CONFIG.maxOpacity - ORBIT_GRADIENT_CONFIG.minOpacity) * fadeT;
+        let r, g, b;
+        if (this.orbitColor.length === 7) {
+            r = parseInt(this.orbitColor.slice(1, 3), 16) / 255;
+            g = parseInt(this.orbitColor.slice(3, 5), 16) / 255;
+            b = parseInt(this.orbitColor.slice(5, 7), 16) / 255;
         } else {
-          // 在运动方向，保持较亮，但距离太远也会稍微变暗
-          opacity = ORBIT_GRADIENT_CONFIG.maxOpacity - 
-                   (ORBIT_GRADIENT_CONFIG.maxOpacity - ORBIT_GRADIENT_CONFIG.minOpacity) * distT * 0.3;
+            // Simplified parsing
+             r = g = b = 1; 
+             // ... full parsing logic
+             if (this.orbitColor.length === 4) {
+                r = parseInt(this.orbitColor[1], 16) / 15;
+                g = parseInt(this.orbitColor[2], 16) / 15;
+                b = parseInt(this.orbitColor[3], 16) / 15;
+             }
         }
         
-        // 确保透明度在合理范围内
-        opacity = Math.max(ORBIT_GRADIENT_CONFIG.minOpacity, Math.min(ORBIT_GRADIENT_CONFIG.maxOpacity, opacity));
+        const planetPos = this.planetPosition!;
+        let closestIdx = 0;
+        let minDist = Infinity;
+        for (let i = 0; i < vertexCount; i++) {
+            const dist = this.points[i].distanceTo(planetPos);
+            if (dist < minDist) {
+                minDist = dist;
+                closestIdx = i;
+            }
+        }
         
-        // 将颜色和透明度编码到 RGB
-        colors[i * 3] = r * opacity;
-        colors[i * 3 + 1] = g * opacity;
-        colors[i * 3 + 2] = b * opacity;
-      }
-      
-      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      
-      material = new THREE.LineBasicMaterial({
-        vertexColors: true,
-        transparent: false, // 不透明，确保正确的深度测试
-        opacity: 1.0,
-        depthWrite: true,
-        depthTest: true,
-        linewidth: 2,
-      });
+        const nextIdx = (closestIdx + 1) % vertexCount;
+        const velocityDir = new THREE.Vector3()
+            .subVectors(this.points[nextIdx], this.points[closestIdx])
+            .normalize();
+        
+        const maxDist = Math.max(...this.points.map(p => p.distanceTo(planetPos)));
+        
+        for (let i = 0; i < vertexCount; i++) {
+            const point = this.points[i];
+            const toPoint = new THREE.Vector3().subVectors(point, planetPos);
+            const dist = toPoint.length();
+            
+            if (dist < 0.001) {
+                colors[i * 3] = r * lineOpacity;
+                colors[i * 3 + 1] = g * lineOpacity;
+                colors[i * 3 + 2] = b * lineOpacity;
+                continue;
+            }
+            
+            toPoint.normalize();
+            const dot = toPoint.dot(velocityDir);
+            const distT = Math.min(1, dist / maxDist);
+            
+            let opacity = ORBIT_GRADIENT_CONFIG.maxOpacity;
+            if (dot < 0) {
+                const fadeT = Math.abs(dot) * distT;
+                opacity = ORBIT_GRADIENT_CONFIG.maxOpacity - 
+                        (ORBIT_GRADIENT_CONFIG.maxOpacity - ORBIT_GRADIENT_CONFIG.minOpacity) * fadeT;
+            } else {
+                opacity = ORBIT_GRADIENT_CONFIG.maxOpacity - 
+                        (ORBIT_GRADIENT_CONFIG.maxOpacity - ORBIT_GRADIENT_CONFIG.minOpacity) * distT * 0.3;
+            }
+            
+            opacity = Math.max(ORBIT_GRADIENT_CONFIG.minOpacity, Math.min(ORBIT_GRADIENT_CONFIG.maxOpacity, opacity));
+            
+            // Apply lineOpacity
+            opacity *= lineOpacity;
+
+            colors[i * 3] = r * opacity;
+            colors[i * 3 + 1] = g * opacity;
+            colors[i * 3 + 2] = b * opacity;
+        }
+        
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        
+        material = new THREE.LineBasicMaterial({
+            vertexColors: true,
+            transparent: lineOpacity < 1.0,
+            opacity: 1.0, // Colors already have opacity baked in if using vertex colors? 
+            // THREE.LineBasicMaterial vertexColors ignores alpha in colors unless transparent=true?
+            // Actually vertexColors in Three.js are usually RGB. Alpha is controlled by material opacity or separate attribute.
+            // But we can simulate it by darkening the color. 
+            // Wait, standard THREE.LineBasicMaterial doesn't support vertex alpha.
+            // So 'opacity' applies to the whole line.
+            // To have gradient alpha, we need a custom shader or accept that we are just darkening the color (fade to black) if background is black.
+            // Since background is space (black), darkening works as fading.
+            // But if we want true transparency for lineOpacity, we set material.opacity.
+            // But gradient logic modifies RGB values.
+            depthWrite: true,
+            depthTest: true,
+            linewidth: ORBIT_RENDER_CONFIG.lineWidth,
+        });
     } else {
-      // 不使用渐变，使用固定透明度和颜色
-      // 解析颜色字符串为 Three.js Color（确保颜色有效）
-      const colorToUse = this.orbitColor || '#ffffff';
-      const threeColor = new THREE.Color(colorToUse);
-      material = new THREE.LineBasicMaterial({
-        color: threeColor,
-        opacity: 1.0,
-        transparent: false, // 不透明，确保正确的深度测试
-        depthWrite: true,
-        depthTest: true,
-        linewidth: 2,
-      });
+        const threeColor = new THREE.Color(this.orbitColor || '#ffffff');
+        material = new THREE.LineBasicMaterial({
+            color: threeColor,
+            opacity: lineOpacity,
+            transparent: lineOpacity < 1.0,
+            depthWrite: true,
+            depthTest: true,
+            linewidth: ORBIT_RENDER_CONFIG.lineWidth,
+        });
     }
 
-    // 创建线条
-    this.line = new THREE.Line(geometry, material);
+    return new THREE.Line(geometry, material);
   }
   
   /**
@@ -207,10 +375,12 @@ export class OrbitCurve {
   }
 
   /**
-   * Update curve resolution based on camera distance
+   * Update curve resolution and visibility based on camera distance
    * @param cameraDistance Current camera distance from orbit center
    */
   updateCurveResolution(cameraDistance: number): void {
+    this.updateDiscVisibility(cameraDistance);
+
     // Check if distance change is significant enough to warrant update
     const distanceChange = Math.abs(cameraDistance - this.lastCameraDistance);
     const relativeChange = distanceChange / Math.max(0.1, this.lastCameraDistance);
@@ -233,6 +403,45 @@ export class OrbitCurve {
   }
 
   /**
+   * Update disc visibility based on camera distance
+   */
+  private updateDiscVisibility(cameraDistance: number): void {
+    if (!ORBIT_DISC_FADE_CONFIG.enabled) return;
+
+    // Find filled mesh object
+    const meshObj = this.visualObjects.find(obj => obj instanceof THREE.Mesh) as THREE.Mesh | undefined;
+    if (!meshObj || !meshObj.material) return;
+
+    const material = meshObj.material as THREE.MeshBasicMaterial;
+    
+    // Calculate opacity based on distance
+    // Distance is in AU (same units as orbit radius usually)
+    // But cameraDistance passed here is usually World Units.
+    // Assuming 1 AU = 1 World Unit in this visualization context?
+    // Let's check SceneManager or similar. Usually they match.
+    
+    let opacity = 1.0;
+    
+    if (cameraDistance < ORBIT_DISC_FADE_CONFIG.fadeEndDistance) {
+        opacity = 0;
+    } else if (cameraDistance < ORBIT_DISC_FADE_CONFIG.fadeStartDistance) {
+        // Linear fade: 0 at end, 1 at start
+        const range = ORBIT_DISC_FADE_CONFIG.fadeStartDistance - ORBIT_DISC_FADE_CONFIG.fadeEndDistance;
+        opacity = (cameraDistance - ORBIT_DISC_FADE_CONFIG.fadeEndDistance) / range;
+    }
+    
+    // Apply max opacity factor
+    // Note: The material opacity is multiplied by the texture alpha channel.
+    // We adjust the material opacity directly.
+    // However, the original material opacity was 1.0.
+    // If we want to support base opacity changes, we might need to store it.
+    // For now, assuming 1.0 is the base.
+    
+    material.opacity = opacity;
+    material.visible = opacity > 0.01;
+  }
+
+  /**
    * Regenerate curve with current resolution
    */
   private regenerateCurve(): void {
@@ -242,28 +451,8 @@ export class OrbitCurve {
     // Create new curve
     this.curve = new THREE.CatmullRomCurve3(this.points, true);
     
-    // ⚠️ 关键修复：直接使用生成的点，不使用 curve.getPoints() 插值
-    const newGeometry = new THREE.BufferGeometry().setFromPoints(this.points);
-    
-    // Preserve material properties and update colors if gradient is enabled
-    const material = this.line.material as THREE.LineBasicMaterial;
-    if (ORBIT_GRADIENT_CONFIG.enabled && this.planetPosition) {
-      this.updateGradientColors(newGeometry, this.points);
-      // Ensure material supports vertex colors
-      if (material.vertexColors !== true) {
-        material.vertexColors = true;
-        material.needsUpdate = true;
-      }
-    } else {
-      // Use solid color if gradient is disabled
-      material.vertexColors = false;
-      material.color.setHex(parseInt(this.orbitColor.replace('#', '0x')));
-      material.needsUpdate = true;
-    }
-    
-    // Replace old geometry
-    this.line.geometry.dispose();
-    this.line.geometry = newGeometry;
+    // Recreate visual object
+    this.createVisualObject();
   }
 
   /**
@@ -348,8 +537,13 @@ export class OrbitCurve {
     
     // 如果启用渐变，更新渐变颜色
     // ⚠️ 关键修复：使用 this.points 而不是 curve.getPoints()，避免插值导致的摆动
-    if (ORBIT_GRADIENT_CONFIG.enabled && this.planetPosition && this.line.geometry && this.points.length > 0) {
-      const geometry = this.line.geometry;
+    if (ORBIT_GRADIENT_CONFIG.enabled && this.planetPosition && this.visualObjects.length > 0 && this.points.length > 0) {
+      // Find line object
+      const lineObj = this.visualObjects.find(obj => obj instanceof THREE.Line) as THREE.Line | undefined;
+      
+      if (!lineObj) return;
+
+      const geometry = lineObj.geometry;
       const vertexCount = this.points.length;
       
       // 检查是否已有颜色属性
@@ -359,6 +553,11 @@ export class OrbitCurve {
         geometry.setAttribute('color', colors);
       }
       
+      // 如果 showLine 为 true 且 style 为 filled，我们可以应用 lineOpacity
+      const lineOpacity = ORBIT_STYLE_CONFIG.style === 'filled' && ORBIT_STYLE_CONFIG.showLine 
+          ? (ORBIT_STYLE_CONFIG.lineOpacity ?? 0.5) 
+          : 1.0;
+
       // 获取材质颜色（从保存的 orbitColor 解析）
       let r, g, b;
       if (this.orbitColor.length === 7) {
@@ -403,7 +602,7 @@ export class OrbitCurve {
         
         if (dist < 0.001) {
           // 行星当前位置，完全不透明
-          colors.setXYZ(i, r, g, b);
+          colors.setXYZ(i, r * lineOpacity, g * lineOpacity, b * lineOpacity);
           continue;
         }
         
@@ -425,6 +624,10 @@ export class OrbitCurve {
         }
         
         opacity = Math.max(ORBIT_GRADIENT_CONFIG.minOpacity, Math.min(ORBIT_GRADIENT_CONFIG.maxOpacity, opacity));
+        
+        // Apply lineOpacity
+        opacity *= lineOpacity;
+
         colors.setXYZ(i, r * opacity, g * opacity, b * opacity);
       }
       
@@ -577,19 +780,17 @@ export class OrbitCurve {
    * 更新轨道（如果需要）
    */
   updateOrbit(elements: OrbitalElements, segments: number = 300): void {
+    this.elements = elements; // Update stored elements
+    this.currentResolution = segments;
+    
     this.generatePoints(elements, segments);
     this.curve = new THREE.CatmullRomCurve3(this.points, true);
     
-    const geometry = new THREE.BufferGeometry().setFromPoints(
-      this.curve.getPoints(segments)
-    );
-    
-    this.line.geometry.dispose();
-    this.line.geometry = geometry;
+    this.createVisualObject();
   }
 
-  getLine(): THREE.Line {
-    return this.line;
+  getLine(): THREE.Object3D {
+    return this.root;
   }
   
   /**

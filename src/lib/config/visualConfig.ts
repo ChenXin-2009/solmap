@@ -122,12 +122,44 @@ export const ORBIT_GRADIENT_CONFIG = {
 };
 
 /**
+ * 轨道样式配置
+ * - style: 'line' | 'filled'
+ *   - 'line': 传统线条轨道
+ *   - 'filled': 填充圆盘/环形轨道，中心透明，边缘清晰
+ * - showLine: 是否在 filled 模式下同时显示轨道线条
+ * - lineOpacity: 线条的不透明度
+ * - fillAlpha: 填充模式下边缘的最大不透明度
+ * - innerRadiusRatio: 填充模式下内圈（透明）半径占外圈半径的比例 (0-1)
+ *   设置为 0.8 表示从 80% 处开始渐变到 100% 处。
+ */
+export const ORBIT_STYLE_CONFIG = {
+  style: 'filled',
+  showLine: true, // 同时显示线条
+  lineOpacity: 1, // 线条稍微淡一点
+  fillAlpha: 0.3, // 边缘清晰
+  innerRadiusRatio: 0.5, // 稍微宽一点，确保覆盖内部
+};
+
+/**
  * 轨道渲染配置
  * - lineWidth: 轨道线宽（注意：WebGL/Three.js 在多数浏览器中对 lineWidth 支持受限，可能被忽略）
  *   如果需要在所有平台上可见的粗线效果，请考虑使用带宽度的 TubeGeometry 或平面条带替代。
  */
 export const ORBIT_RENDER_CONFIG = {
-  lineWidth: 3,
+  lineWidth: 5,
+};
+
+/**
+ * 轨道圆盘渐隐配置
+ * 控制轨道圆盘在相机靠近行星时自动渐隐，避免遮挡视线
+ * - fadeStartDistance: 渐隐开始距离（AU），小于此距离开始变透明
+ * - fadeEndDistance: 渐隐结束距离（AU），小于此距离完全透明
+ * - maxOpacity: 圆盘的最大不透明度（会乘以 ORBIT_STYLE_CONFIG.fillAlpha）
+ */
+export const ORBIT_DISC_FADE_CONFIG = {
+  enabled: true,
+  fadeStartDistance: 0.8, // 0.5 AU 开始渐隐
+  fadeEndDistance: 0.005,   // 0.1 AU 完全透明
 };
 
 /**
