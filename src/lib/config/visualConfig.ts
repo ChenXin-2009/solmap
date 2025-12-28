@@ -105,9 +105,9 @@ export const SUN_GLOW_CONFIG = {
  * 建议：根据场景缩放调整 radiusMultiplier，以避免在超远摄时层过大遮挡场景。
  */
 export const SUN_RAINBOW_LAYERS = [
-  { color: '#ff6b6b', radiusMultiplier: 1.9, opacity: 0.08 },
-  { color: '#ffd56b', radiusMultiplier: 2.3, opacity: 0.06 },
-  { color: '#6bd6ff', radiusMultiplier: 2.8, opacity: 0.05 },
+  { color: '#ff6b6b', radiusMultiplier: 1.9, opacity: 0.32 },
+  { color: '#ffd56b', radiusMultiplier: 2.3, opacity: 0.25 },
+  { color: '#6bd6ff', radiusMultiplier: 2.8, opacity: 0.2 },
 ];
 
 /**
@@ -135,18 +135,19 @@ export const ORBIT_GRADIENT_CONFIG = {
 export const ORBIT_STYLE_CONFIG = {
   style: 'filled',
   showLine: true, // 同时显示线条
-  lineOpacity: 1, // 线条稍微淡一点
+  lineOpacity: 1, // 线条透明度
   fillAlpha: 0.3, // 边缘清晰
   innerRadiusRatio: 0.5, // 稍微宽一点，确保覆盖内部
 };
 
 /**
  * 轨道渲染配置
- * - lineWidth: 轨道线宽（注意：WebGL/Three.js 在多数浏览器中对 lineWidth 支持受限，可能被忽略）
- *   如果需要在所有平台上可见的粗线效果，请考虑使用带宽度的 TubeGeometry 或平面条带替代。
+ * ⚠️ 注意：WebGL 在大多数现代浏览器中不支持 lineWidth > 1
+ * 这是 WebGL 规范的限制，不是 Three.js 或本项目的问题
+ * 如需粗线条效果，建议使用 'filled' 样式（圆盘填充）
  */
 export const ORBIT_RENDER_CONFIG = {
-  lineWidth: 5,
+  lineWidth: 1, // WebGL 限制：大多数浏览器只支持 1
 };
 
 /**
@@ -158,27 +159,8 @@ export const ORBIT_RENDER_CONFIG = {
  */
 export const ORBIT_DISC_FADE_CONFIG = {
   enabled: true,
-  fadeStartDistance: 0.8, // 0.5 AU 开始渐隐
-  fadeEndDistance: 0.005,   // 0.1 AU 完全透明
-};
-
-/**
- * 轨道可见性与遮挡控制
- * - hideAtScale: 当场景缩放（或世界单位缩放因子）小于此阈值时隐藏轨道（避免在极小尺度下大量轨道遮挡）
- * - preventOrbitOverSun: 当轨道与太阳视线重叠时尝试降低轨道不透明度或隐藏，防止遮挡太阳视觉效果
- */
-export const ORBIT_VISIBILITY_CONFIG = {
-  hideAtScale: 0.0005,
-  preventOrbitOverSun: true,
-  fadeDuration: 0.6, // 秒，轨道显示/隐藏的渐变时长
-};
-
-// 轨道屏幕空间可见性阈值（以像素为单位）
-// 当轨道在屏幕上的投影半径小于 `pixelHideThreshold` 时，会开始淡出；
-// 在 `pixelHideThreshold + pixelFadeRange` 之外完全隐藏。
-export const ORBIT_SCREEN_THRESHOLD = {
-  pixelHideThreshold: 5,
-  pixelFadeRange: 50,
+  fadeStartDistance: 0.8, //  开始渐隐
+  fadeEndDistance: 0.005,   // 完全透明
 };
 
 /**
@@ -193,29 +175,6 @@ export const CAMERA_CONFIG = {
   minDistanceToBody: 0.002, // 以天体半径为参考的比例（在代码中会乘以目标半径）
   initialTiltDeg: 30,
   initialTransitionSec: 1.2,
-};
-
-/**
- * 标尺（ScaleRuler）配置
- */
-export const SCALE_RULER_CONFIG = {
-  enabled: true,
-  unit: 'km',
-  // 屏幕上最小/最大像素长度用于缩放显示（避免太小或太大）
-  minPx: 40,
-  maxPx: 220,
-};
-
-/**
- * 纹理加载策略
- * - lowResPlaceholder: 本地或打包的低分辨率占位图（用于默认展示）
- * - highResDistanceThreshold: 当相机距离目标小于该值时开始加载高分辨率 NASA 纹理
- *   距离单位与 CameraController 距离计算保持一致
- */
-export const TEXTURE_LOADING_CONFIG = {
-  lowResPlaceholder: '/textures/placeholder-lowres.jpg',
-  highResDistanceThreshold: 0.8, // 当相机相对目标距离小于此值时加载高分辨率贴图
-  preferGPU: true,
 };
 
 /**
@@ -317,146 +276,6 @@ export const HEADER_CONFIG = {
   
   // 文字区域与LOGO的间距（像素）
   contentGap: 20,
-};
-
-/**
- * 相机防穿透约束配置
- * 当相机接近或穿过行星表面时的约束行为
- */
-export const CAMERA_PENETRATION_CONFIG = {
-  // 防穿透安全距离倍数：相对于行星半径的倍数。
-  // 当相机距离 < 行星半径 * 此倍数时，触发防穿透约束
-  // 降低到1.5倍，允许更接近星球表面观察细节
-  safetyDistanceMultiplier: 1.5,
-  
-  // 防穿透约束的平滑过渡速度（0-1），用于平滑调整焦点位置
-  // 降低平滑度，减少约束对用户操作的干扰
-  constraintSmoothness: 0.15,
-  
-  // 约束应用时是否同时调整相机距离以避免跳跃
-  // true：焦点和相机都调整；false：仅调整焦点
-  adjustCameraDistance: true,
-  
-  // 当检测到穿透时是否立即强制修正位置（true 会把相机和焦点直接设置到安全位置以防止继续穿透）
-  // 改为false，使用平滑过渡，避免突然跳跃
-  forceSnap: false,
-  
-  // 启用防穿透约束的调试模式
-  // true：会在控制台打印约束触发和参数信息
-  debugMode: false,
-};
-
-/**
- * 相机缩放配置
- * 控制相机缩放行为和速度
- */
-export const CAMERA_ZOOM_CONFIG = {
-  // 最小缩放距离（极小值以支持无限放大如地图软件）
-  // 更小的值允许更接近天体。建议：0.00001-0.0001
-  minDistance: 0.00001,
-  
-  // 最大缩放距离
-  // 更大的值允许更远距离观看。建议：500-2000
-  maxDistance: 1000,
-  
-  // 缩放速度因子（OrbitControls 内部使用）
-  // 值越大鼠标滚轮缩放越敏感。建议范围：1.0-2.5
-  zoomSpeed: 1.5,
-  
-  // 基础缩放因子（滚轮缩放的基础倍数）
-  // 进一步降低缩放因子，使大范围缩放更精细可控，减少跳跃感
-  zoomBaseFactor: 0.15,
-  
-  // 缩放缓动速度（0-1之间，越大越快）
-  // 适中提高缓动速度，改善大范围缩放体验
-  zoomEasingSpeed: 0.22,
-};
-
-/**
- * 相机聚焦配置
- * 点击行星聚焦时的行为
- */
-export const CAMERA_FOCUS_CONFIG = {
-  // 聚焦动画的插值速度（0-1，越大越快）
-  // 提高聚焦速度，减少等待时间
-  focusLerpSpeed: 0.3,
-  
-  // 聚焦动画完成阈值（距离小于此值认为完成）
-  // 用于判断聚焦动画是否完成。建议：0.001-0.05
-  focusThreshold: 0.01,
-  
-  // 聚焦后初始相机距离相对于行星半径的倍数
-  // 降低初始距离，允许更接近观察
-  focusDistanceMultiplier: 5,
-  
-  // 防穿透时的最小距离倍数（相对于行星半径）
-  // 与CAMERA_PENETRATION_CONFIG保持一致
-  minDistanceMultiplier: 1.5,
-};
-
-/**
- * 相机跟踪配置
- * 聚焦后跟踪行星运动的行为
- */
-export const CAMERA_TRACKING_CONFIG = {
-  // 跟踪时的插值速度（0-1，越大越快，值越大跟随越紧密）
-  // 用于平滑跟踪行星运动。建议范围：0.05-0.25
-  trackingLerpSpeed: 0.15,
-};
-
-/**
- * 相机视角配置
- * 相机的投影和视角参数
- */
-export const CAMERA_VIEW_CONFIG = {
-  // 相机视野角度（FOV，度），值越大视野越广，边缘畸变越明显
-  // 建议范围：45-75
-  fov: 45,
-  
-  // 视角平滑过渡速度（0-1，越大越快）
-  // 用于平滑修改相机视野角度。建议范围：0.1-0.25
-  fovTransitionSpeed: 0.15,
-  
-  // 动态近平面调整倍数：当相机靠近行星时，近平面 = 距离 * 此倍数
-  // 防止相机靠近时因近平面裁剪而导致行星消失
-  // ⚠️ 关键参数：值越小近平面调整越激进，允许更接近行星
-  // 0.01 = 当距离为1时近平面为0.01，非常接近（推荐用于无限放大）
-  dynamicNearPlaneMultiplier: 0.01,
-  
-  // 最小近平面距离（绝对值）
-  // 防止近平面过小导致深度精度问题，但要足够小以支持极近距离观看
-  // ⚠️ 关键参数：0.00001 = 10纳米级，足够支持接近观看
-  minNearPlane: 0.000001,
-  
-  // 最大远平面距离（绝对值）
-  // 太阳系超大尺度需要很大的远平面。建议：1e10-1e12
-  maxFarPlane: 1e12,
-};
-
-/**
- * 相机操作配置
- * 控制各种输入操作的响应
- */
-export const CAMERA_OPERATION_CONFIG = {
-  // 阻尼系数（0-1，值越小缓动越明显，惯性越强）
-  // 控制相机旋转/平移的惯性效果。建议范围：0.01-0.1
-  dampingFactor: 0.03,
-  
-  // 平移速度因子
-  // 值越大鼠标/触摸平移越敏感。建议范围：0.3-1.0
-  panSpeed: 0.8,
-  
-  // 旋转速度因子
-  // 值越大鼠标/触摸旋转越敏感。建议范围：0.5-1.5
-  rotateSpeed: 0.8,
-  
-  // 极角平滑过渡速度（0-1，越大越快）
-  // 用于平滑调整相机的上下视角。建议范围：0.05-0.15
-  polarAngleTransitionSpeed: 0.08,
-  
-  // 方位角平滑过渡速度（0-1，越大越快）
-  // 用于平滑调整相机的左右视角。建议范围：0.05-0.15
-  azimuthalAngleTransitionSpeed: 0.1,
 };
 
 /**
@@ -572,55 +391,6 @@ export const PLANET_AXIAL_TILT: Record<string, number> = {
  * - 贴图尺寸不影响碰撞/拾取半径
  * - BodyId 必须与 Physical Layer 定义一致（小写）
  */
-
-/**
- * ==================== 贴图策略约束（Phase 1 锁定） ====================
- * 
- * ⚠️ LOCKED: 以下约束在 Phase 1 期间不可更改
- * 
- * 这些约束是系统稳定性的"护城河"，防止后续开发破坏系统边界。
- * 任何修改必须经过完整的设计评审。
- */
-export const TEXTURE_STRATEGY_CONSTRAINTS = {
-  /**
-   * ✅ 允许的贴图类型
-   * Phase 1 仅支持 BaseColor（Albedo）贴图
-   */
-  ALLOWED_TEXTURE_TYPES: ['baseColor'] as const,
-  
-  /**
-   * ✅ 允许的分辨率
-   * Low (2K) 和 High (4K) 两档，不支持 8K
-   */
-  ALLOWED_RESOLUTIONS: ['2k', '4k'] as const,
-  
-  
-  /**
-   * ✅ 已实现的功能（Phase 1）
-   * 这些功能已在当前版本中实现
-   */
-  IMPLEMENTED_FEATURES: [
-    'night_lights',     // 夜面灯光 - 已实现（地球）
-  ] as const,
-  
-  /**
-   * ✅ Sun 永远 emissive-only
-   * Sun 在 Phase 1 期间不使用任何贴图
-   */
-  SUN_EMISSIVE_ONLY: true,
-  
-  /**
-   * ✅ 默认分辨率
-   * 使用 2K 以优化内存
-   */
-  DEFAULT_RESOLUTION: '2k' as const,
-  
-  /**
-   * Phase 1 版本标识
-   */
-  PHASE: 1,
-  VERSION: '3.1.0',
-} as const;
 
 /**
  * 行星贴图配置接口
@@ -1167,7 +937,7 @@ export const SATURN_RING_CONFIG = {
   texturePath: '/textures/planets/2k_saturn_ring_alpha.png',
   
   /** 环的不透明度 */
-  opacity: 0.9,
+  opacity: 3,
   
   /** 环的分段数（影响圆滑度） */
   segments: 128,

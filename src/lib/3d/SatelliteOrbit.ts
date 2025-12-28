@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ORBIT_RENDER_CONFIG, ORBIT_GRADIENT_CONFIG } from '@/lib/config/visualConfig';
+import { ORBIT_RENDER_CONFIG, ORBIT_STYLE_CONFIG } from '@/lib/config/visualConfig';
 
 /**
  * 卫星轨道渲染类（支持母行星轴倾角的动态轨道平面）
@@ -10,7 +10,8 @@ import { ORBIT_RENDER_CONFIG, ORBIT_GRADIENT_CONFIG } from '@/lib/config/visualC
  * - 这确保了物理正确的卫星轨道表现
  */
 export class SatelliteOrbit {
-  private line: THREE.Line;
+  private root: THREE.Group;
+  private visualObjects: THREE.Object3D[] = [];
   private radius: number;
   private color: string;
   private inclination: number;  // 相对于母行星赤道面的轨道倾角（弧度）
@@ -19,6 +20,10 @@ export class SatelliteOrbit {
   private parentBodyName: string; // 母行星名称
   private isOrientationSet: boolean = false; // 是否已设置朝向
   private eclipticOrbit: boolean; // 是否相对于黄道面而非母行星赤道面
+  private points: THREE.Vector3[] = []; // 轨道点
+
+  // 静态渐变纹理缓存
+  private static gradientTexture: THREE.Texture | null = null;
 
   constructor(
     radius: number,
@@ -29,6 +34,7 @@ export class SatelliteOrbit {
     parentBodyName: string = '',
     eclipticOrbit: boolean = false
   ) {
+    this.root = new THREE.Group();
     this.radius = radius;
     this.color = color;
     this.inclination = inclination;
@@ -37,105 +43,22 @@ export class SatelliteOrbit {
     this.parentBodyName = parentBodyName;
     this.eclipticOrbit = eclipticOrbit;
 
-    // 简单材质（不做渐变，因为卫星轨道通常较小）
-    const material = new THREE.LineBasicMaterial({
-      color: new THREE.Color(this.color),
-      transparent: false, // 不透明，确保正确的深度测试
-      opacity: 1.0,
-      linewidth: ORBIT_RENDER_CONFIG.lineWidth,
-      depthWrite: true,
-      depthTest: true,
-    });
-
-    // 创建初始轨道几何体（在母行星赤道面内）
-    const initialGeometry = this.createOrbitGeometry();
-    this.line = new THREE.Line(initialGeometry, material);
+    // 生成轨道点
+    this.generateOrbitPoints();
     
-    // 立即设置正确的朝向（一次性设置）
+    // 创建可视化对象
+    this.createVisualObjects();
+    
+    // 设置正确的朝向（一次性设置）
     this.setCorrectOrientation();
   }
 
   /**
-   * 设置正确的轨道朝向（基于母行星轴倾角，一次性设置）
-   * 
-   * 物理原理：
-   * - 大部分卫星轨道在母行星的赤道面内
-   * - 月球等特殊卫星轨道相对于黄道面倾斜
-   * - 轨道平面的法向量 = 母行星的自转轴向量（赤道面轨道）或黄道面法向量（黄道面轨道）
+   * 生成轨道点
    */
-  private setCorrectOrientation(): void {
-    if (this.isOrientationSet || !this.parentBodyName) return;
+  private generateOrbitPoints(): void {
+    this.points = [];
     
-    if (this.eclipticOrbit) {
-      // 月球等：轨道相对于黄道面，不需要额外变换
-      this.isOrientationSet = true;
-      return;
-    }
-    
-    try {
-      // 动态导入 CELESTIAL_BODIES 以获取母行星轴倾角
-      const { CELESTIAL_BODIES } = require('@/lib/types/celestialTypes');
-      const parentConfig = CELESTIAL_BODIES[this.parentBodyName];
-      
-      if (parentConfig && parentConfig.orientation && parentConfig.orientation.spinAxis) {
-        const [x, y, z] = parentConfig.orientation.spinAxis;
-        
-        // 母行星自转轴向量（ICRF坐标系）
-        const spinAxisICRF = new THREE.Vector3(x, y, z);
-        
-        // 转换到渲染坐标系（ICRF -> Three.js）
-        const spinAxisRender = new THREE.Vector3(
-          spinAxisICRF.x,  // X 保持不变
-          spinAxisICRF.z,  // ICRF Z -> Render Y
-          -spinAxisICRF.y  // ICRF Y -> Render -Z
-        );
-        
-        // 🔧 关键修复：创建母行星赤道面坐标系
-        // 轨道平面在赤道面内，法向量是自转轴
-        // 我们需要将默认的XY平面（法向量为Z轴）转换为垂直于自转轴的平面
-        
-        const defaultNormal = new THREE.Vector3(0, 0, 1);  // 默认轨道平面法向量（Z轴向上）
-        const targetNormal = spinAxisRender.normalize();   // 目标法向量（自转轴方向）
-        
-        const parentAxisQuaternion = new THREE.Quaternion();
-        parentAxisQuaternion.setFromUnitVectors(defaultNormal, targetNormal);
-        
-        // 应用变换到轨道几何体
-        this.applyOrientationTransform(parentAxisQuaternion);
-        this.isOrientationSet = true;
-      }
-    } catch (error) {
-      console.warn(`Failed to set orbit orientation for ${this.parentBodyName}:`, error);
-    }
-  }
-
-  /**
-   * 应用朝向变换到轨道几何体（一次性变换）
-   */
-  private applyOrientationTransform(quaternion: THREE.Quaternion): void {
-    const positions = this.line.geometry.attributes.position.array as Float32Array;
-    const transformedPoints: THREE.Vector3[] = [];
-
-    // 对每个轨道点应用变换
-    for (let i = 0; i < positions.length; i += 3) {
-      const point = new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2]);
-      point.applyQuaternion(quaternion);
-      transformedPoints.push(point);
-    }
-
-    // 更新几何体
-    const newGeometry = new THREE.BufferGeometry().setFromPoints(transformedPoints);
-    this.line.geometry.dispose();
-    this.line.geometry = newGeometry;
-  }
-
-  /**
-   * 创建轨道几何体（在母行星赤道面内）
-   */
-  private createOrbitGeometry(): THREE.BufferGeometry {
-    const points: THREE.Vector3[] = [];
-    
-    // 生成轨道上的点（在母行星赤道面内，考虑卫星轨道倾角）
     const cos_i = Math.cos(this.inclination);
     const sin_i = Math.sin(this.inclination);
     const cos_Om = Math.cos(this.Omega);
@@ -150,36 +73,262 @@ export class SatelliteOrbit {
       const z_orb = 0;
 
       // 应用卫星轨道倾角和升交点黄经（相对于母行星赤道面）
-      // 第一步：绕 Z 轴旋转升交点黄经 (Omega)
       const x_1 = x_orb * cos_Om - y_orb * sin_Om;
       const y_1 = x_orb * sin_Om + y_orb * cos_Om;
       const z_1 = z_orb;
 
-      // 第二步：绕 X 轴旋转倾角 (inclination)
       const x_final = x_1;
       const y_final = y_1 * cos_i - z_1 * sin_i;
       const z_final = y_1 * sin_i + z_1 * cos_i;
 
-      points.push(new THREE.Vector3(x_final, y_final, z_final));
+      this.points.push(new THREE.Vector3(x_final, y_final, z_final));
     }
-
-    return new THREE.BufferGeometry().setFromPoints(points);
   }
 
-  getLine() {
-    return this.line;
+  /**
+   * 创建可视化对象（填充圆盘 + 线条）
+   */
+  private createVisualObjects(): void {
+    // 清理现有对象
+    this.visualObjects.forEach(obj => {
+      this.root.remove(obj);
+      if (obj instanceof THREE.Line || obj instanceof THREE.Mesh) {
+        obj.geometry.dispose();
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(m => m.dispose());
+        } else if (obj.material) {
+          obj.material.dispose();
+        }
+      }
+    });
+    this.visualObjects = [];
+
+    if (ORBIT_STYLE_CONFIG.style === 'filled') {
+      // 创建填充圆盘
+      const mesh = this.createFilledMesh();
+      if (mesh) {
+        this.root.add(mesh);
+        this.visualObjects.push(mesh);
+      }
+      
+      // 如果配置了同时显示线条
+      if (ORBIT_STYLE_CONFIG.showLine) {
+        const line = this.createLine();
+        if (line) {
+          this.root.add(line);
+          this.visualObjects.push(line);
+        }
+      }
+    } else {
+      // 仅线条模式
+      const line = this.createLine();
+      if (line) {
+        this.root.add(line);
+        this.visualObjects.push(line);
+      }
+    }
+  }
+
+  /**
+   * 创建渐变纹理（静态缓存）
+   */
+  private static getGradientTexture(): THREE.Texture {
+    if (SatelliteOrbit.gradientTexture) return SatelliteOrbit.gradientTexture;
+    
+    if (typeof document === 'undefined') {
+      return new THREE.Texture();
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 2;
+    canvas.height = 64;
+    const context = canvas.getContext('2d')!;
+    
+    const gradient = context.createLinearGradient(0, 64, 0, 0);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    gradient.addColorStop(1, `rgba(255, 255, 255, ${ORBIT_STYLE_CONFIG.fillAlpha})`);
+    
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 2, 64);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+    
+    SatelliteOrbit.gradientTexture = texture;
+    return texture;
+  }
+
+  /**
+   * 创建填充圆盘网格
+   */
+  private createFilledMesh(): THREE.Mesh | null {
+    if (this.points.length < 2) return null;
+
+    const vertexCount = this.points.length;
+    const positions = new Float32Array(vertexCount * 2 * 3);
+    const uvs = new Float32Array(vertexCount * 2 * 2);
+    const indices: number[] = [];
+
+    const innerRatio = ORBIT_STYLE_CONFIG.innerRadiusRatio;
+
+    for (let i = 0; i < vertexCount; i++) {
+      const point = this.points[i];
+      
+      // 外顶点（原始点）
+      positions[i * 6] = point.x;
+      positions[i * 6 + 1] = point.y;
+      positions[i * 6 + 2] = point.z;
+      
+      // 内顶点（向中心缩放）
+      positions[i * 6 + 3] = point.x * innerRatio;
+      positions[i * 6 + 4] = point.y * innerRatio;
+      positions[i * 6 + 5] = point.z * innerRatio;
+
+      // UV 坐标
+      uvs[i * 4] = 0;
+      uvs[i * 4 + 1] = 1; // V=1 (外边缘)
+      uvs[i * 4 + 2] = 0;
+      uvs[i * 4 + 3] = 0; // V=0 (内边缘)
+    }
+
+    // 创建三角形索引
+    for (let i = 0; i < vertexCount - 1; i++) {
+      const outerCurrent = 2 * i;
+      const innerCurrent = 2 * i + 1;
+      const outerNext = 2 * (i + 1);
+      const innerNext = 2 * (i + 1) + 1;
+      
+      indices.push(outerCurrent, innerCurrent, outerNext);
+      indices.push(innerCurrent, innerNext, outerNext);
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+
+    const material = new THREE.MeshBasicMaterial({
+      map: SatelliteOrbit.getGradientTexture(),
+      color: new THREE.Color(this.color),
+      transparent: true,
+      opacity: 1.0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.NormalBlending,
+    });
+
+    return new THREE.Mesh(geometry, material);
+  }
+
+  /**
+   * 创建线条
+   */
+  private createLine(): THREE.Line | null {
+    if (this.points.length < 2) return null;
+
+    const geometry = new THREE.BufferGeometry().setFromPoints(this.points);
+    
+    const lineOpacity = ORBIT_STYLE_CONFIG.style === 'filled' && ORBIT_STYLE_CONFIG.showLine 
+      ? (ORBIT_STYLE_CONFIG.lineOpacity ?? 0.5) 
+      : 1.0;
+
+    const material = new THREE.LineBasicMaterial({
+      color: new THREE.Color(this.color),
+      transparent: lineOpacity < 1.0,
+      opacity: lineOpacity,
+      linewidth: ORBIT_RENDER_CONFIG.lineWidth,
+      depthWrite: true,
+      depthTest: true,
+    });
+
+    return new THREE.Line(geometry, material);
+  }
+
+  /**
+   * 设置正确的轨道朝向（基于母行星轴倾角，一次性设置）
+   */
+  private setCorrectOrientation(): void {
+    if (this.isOrientationSet || !this.parentBodyName) return;
+    
+    if (this.eclipticOrbit) {
+      this.isOrientationSet = true;
+      return;
+    }
+    
+    try {
+      const { CELESTIAL_BODIES } = require('@/lib/types/celestialTypes');
+      const parentConfig = CELESTIAL_BODIES[this.parentBodyName];
+      
+      if (parentConfig && parentConfig.orientation && parentConfig.orientation.spinAxis) {
+        const [x, y, z] = parentConfig.orientation.spinAxis;
+        
+        const spinAxisICRF = new THREE.Vector3(x, y, z);
+        const spinAxisRender = new THREE.Vector3(
+          spinAxisICRF.x,
+          spinAxisICRF.z,
+          -spinAxisICRF.y
+        );
+        
+        const defaultNormal = new THREE.Vector3(0, 0, 1);
+        const targetNormal = spinAxisRender.normalize();
+        
+        const parentAxisQuaternion = new THREE.Quaternion();
+        parentAxisQuaternion.setFromUnitVectors(defaultNormal, targetNormal);
+        
+        // 应用变换到整个组
+        this.root.quaternion.copy(parentAxisQuaternion);
+        this.isOrientationSet = true;
+      }
+    } catch (error) {
+      console.warn(`Failed to set orbit orientation for ${this.parentBodyName}:`, error);
+    }
+  }
+
+  /**
+   * 获取轨道组（用于添加到场景）
+   */
+  getLine(): THREE.Group {
+    return this.root;
   }
 
   /**
    * 将轨道中心移动到给定世界坐标位置
    */
   updatePlanetPosition(position: THREE.Vector3): void {
-    this.line.position.copy(position);
+    this.root.position.copy(position);
   }
 
-  dispose() {
-    this.line.geometry.dispose();
-    // @ts-ignore
-    if (this.line.material) this.line.material.dispose();
+  /**
+   * 更新轨道透明度（用于渐隐效果）
+   */
+  setOpacity(opacity: number): void {
+    this.visualObjects.forEach(obj => {
+      if (obj instanceof THREE.Mesh || obj instanceof THREE.Line) {
+        const material = obj.material as THREE.Material;
+        if (material && 'opacity' in material) {
+          material.opacity = opacity;
+          material.transparent = opacity < 1.0;
+        }
+      }
+    });
+  }
+
+  dispose(): void {
+    this.visualObjects.forEach(obj => {
+      if (obj instanceof THREE.Line || obj instanceof THREE.Mesh) {
+        obj.geometry.dispose();
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(m => m.dispose());
+        } else if (obj.material) {
+          obj.material.dispose();
+        }
+      }
+    });
+    this.visualObjects = [];
   }
 }

@@ -18,7 +18,7 @@ import { ORBIT_GRADIENT_CONFIG, ORBIT_RENDER_CONFIG, ORBIT_STYLE_CONFIG, ORBIT_D
 export class OrbitCurve {
   private root: THREE.Group;
   private visualObjects: THREE.Object3D[] = [];
-  private curve: THREE.CatmullRomCurve3;
+  private curve!: THREE.CatmullRomCurve3;
   private points: THREE.Vector3[] = [];
   private planetPosition: THREE.Vector3 | null = null; // 行星当前位置（用于计算渐变方向）
   private orbitColor: string; // 保存轨道颜色字符串

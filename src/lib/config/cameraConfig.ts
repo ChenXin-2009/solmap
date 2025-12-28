@@ -3,12 +3,6 @@
  * 从 visualConfig.ts 中提取，便于快速调整和查找
  */
 
-// 🐛 立即调试：文件加载时输出配置
-console.log('🔧 cameraConfig.ts 加载 - 配置值:', {
-  timestamp: new Date().toISOString(),
-  file: 'cameraConfig.ts'
-});
-
 /**
  * 🎯 快速调整区域 - 常用参数
  * 这些是最常调整的参数，放在文件顶部便于快速找到
@@ -46,13 +40,6 @@ export const QUICK_CAMERA_SETTINGS = {
    */
   trackingLerpSpeed: 0.18,
 };
-
-// 🐛 立即调试：配置定义后输出值
-console.log('🔧 QUICK_CAMERA_SETTINGS 定义完成:', {
-  zoomEasingSpeed: QUICK_CAMERA_SETTINGS.zoomEasingSpeed,
-  zoomBaseFactor: QUICK_CAMERA_SETTINGS.zoomBaseFactor,
-  timestamp: new Date().toISOString()
-});
 
 /**
  * 🔧 缩放范围控制

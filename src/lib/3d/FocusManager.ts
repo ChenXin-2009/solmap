@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three';
-import { CAMERA_FOCUS_CONFIG, CAMERA_PENETRATION_CONFIG } from '@/lib/config/visualConfig';
+import { CAMERA_PENETRATION_CONFIG, FOCUS_SETTINGS } from '@/lib/config/cameraConfig';
 
 export interface CelestialObject {
   name: string;
@@ -44,7 +44,7 @@ export class FocusManager {
    */
   calculateFocusDistance(object: CelestialObject, options?: FocusOptions): number {
     // Base distance multiplier based on object type
-    let baseMultiplier = CAMERA_FOCUS_CONFIG.focusDistanceMultiplier;
+    let baseMultiplier = FOCUS_SETTINGS.focusDistanceMultiplier;
     
     // Adjust multiplier based on object type
     if (object.isSun) {

@@ -14,7 +14,7 @@
  */
 
 import * as THREE from 'three';
-import { CAMERA_VIEW_CONFIG } from '../config/visualConfig';
+import { VIEW_SETTINGS } from '../config/cameraConfig';
 
 export class SceneManager {
   private renderer: THREE.WebGLRenderer;
@@ -166,7 +166,7 @@ export class SceneManager {
     // 兼容 CameraController 的动态 near 调整：
     // - 不强行覆盖更小的 near（例如 CameraController 为避免剔除而设置的值）
     // - 建议 near 基于配置的最小值
-    const suggestedNear = Math.max(CAMERA_VIEW_CONFIG.minNearPlane, Math.min(0.01, currentObjectRadius * 0.001));
+    const suggestedNear = Math.max(VIEW_SETTINGS.minNearPlane, Math.min(0.01, currentObjectRadius * 0.001));
 
     // 仅当当前 camera.near 比建议值大时，才将其缩小到建议值；否则保持当前（以保留动态调整）
     if (this.camera.near > suggestedNear) {
@@ -174,7 +174,7 @@ export class SceneManager {
     }
 
     // far 值：确保足够大，覆盖整个太阳系
-    const far = Math.max(100, Math.min(CAMERA_VIEW_CONFIG.maxFarPlane || 1e12, distanceToSun * 10));
+    const far = Math.max(100, Math.min(VIEW_SETTINGS.maxFarPlane || 1e12, distanceToSun * 10));
     this.camera.far = far;
 
     this.camera.updateProjectionMatrix();

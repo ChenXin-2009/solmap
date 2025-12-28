@@ -13,9 +13,6 @@ class CameraConfigManager {
   constructor() {
     // 初始化为默认配置
     this.config = { ...QUICK_CAMERA_SETTINGS };
-    
-    // 调试输出
-    console.log('🔧 CameraConfigManager 初始化:', this.config);
   }
 
   /**
@@ -30,11 +27,6 @@ class CameraConfigManager {
    */
   updateConfig(newConfig: Partial<CameraConfigType>): void {
     this.config = { ...this.config, ...newConfig };
-    
-    console.log('🔧 配置已更新:', {
-      updated: newConfig,
-      current: this.config
-    });
     
     // 通知所有监听器
     this.listeners.forEach(listener => {
