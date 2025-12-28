@@ -849,8 +849,17 @@ export class OrbitCurve {
   }
 
   dispose(): void {
-    this.line.geometry.dispose();
-    (this.line.material as THREE.Material).dispose();
+    this.visualObjects.forEach(obj => {
+      if (obj instanceof THREE.Line || obj instanceof THREE.Mesh) {
+        obj.geometry.dispose();
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(m => m.dispose());
+        } else if (obj.material) {
+          (obj.material as THREE.Material).dispose();
+        }
+      }
+    });
+    this.visualObjects = [];
   }
 }
 

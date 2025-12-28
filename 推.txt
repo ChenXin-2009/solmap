@@ -23,9 +23,9 @@ git push origin v3.0.0
 ==================
 git status
 git add .
-git commit -m "Release 3.4.1: 添加卫星圆盘轨道"
+git commit -m "Release 3.4.2: 修复了一些问题"
 git checkout main
 git pull origin main
-git tag v3.4.1
+git tag v3.4.2
 git push origin main
-git push origin v3.4.1
+git push origin v3.4.2
