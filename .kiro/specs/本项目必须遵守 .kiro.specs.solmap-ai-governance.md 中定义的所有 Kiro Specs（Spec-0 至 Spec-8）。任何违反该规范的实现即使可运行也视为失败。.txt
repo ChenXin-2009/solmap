@@ -1,1 +1,0 @@
-本项目必须遵守 .kirospecssolmap-ai-governance.md 中定义的所有 Kiro Specs（Spec-0 至 Spec-8）。任何违反该规范的实现即使可运行也视为失败。
