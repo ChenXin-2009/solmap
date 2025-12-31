@@ -23,9 +23,9 @@ git push origin v3.0.0
 ==================
 git status
 git add .
-git commit -m "Release 3.4.2: 修复了一些问题"
+git commit -m "Release 3.4.3: 优化轨道显示逻辑"
 git checkout main
 git pull origin main
-git tag v3.4.2
+git tag v3.4.3
 git push origin main
-git push origin v3.4.2
+git push origin v3.4.3

@@ -18,13 +18,7 @@
 import * as THREE from 'three';
 import type { CelestialBody } from '@/lib/astronomy/orbit';
 import { CelestialBodyConfig, rotationPeriodToSpeed } from '@/lib/types/celestialTypes';
-import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS, PLANET_LOD_CONFIG, PLANET_GRID_CONFIG, PLANET_AXIAL_TILT, PLANET_LIGHTING_CONFIG, getCelestialMaterialParams, SATURN_RING_CONFIG } from '@/lib/config/visualConfig';
-import { orbitalCalculator } from '@/lib/axial-tilt/orbital-calculator';
-import { spinAxisCalculator } from '@/lib/axial-tilt/spin-axis-calculator';
-import { meshOrientationManager, createMeshOrientationManagerExtended } from '@/lib/axial-tilt/mesh-orientation-manager';
-import { createVector3, DEFAULT_MODEL_CONFIG } from '@/lib/axial-tilt/types';
-import type { Vector3 as AxialTiltVector3, CelestialBodyOrientationState } from '@/lib/axial-tilt/types';
-import { installRotationMonitoring } from '@/lib/axial-tilt/dev-warnings';
+import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS, PLANET_LOD_CONFIG, PLANET_GRID_CONFIG, PLANET_LIGHTING_CONFIG, getCelestialMaterialParams, SATURN_RING_CONFIG } from '@/lib/config/visualConfig';
 
 // 真实行星半径（AU单位）
 // 1 AU = 149,597,870 km
@@ -59,7 +53,6 @@ export class Planet {
   private geometry: THREE.SphereGeometry;
   private material: THREE.ShaderMaterial | THREE.MeshStandardMaterial;
   private rotationSpeed: number;
-  private currentRotation: number = 0;
   private realRadius: number; // 真实半径（AU）
   private markerDiv: HTMLDivElement | null = null; // 标记圈DOM元素（2D）
   private markerObject: any = null; // CSS2DObject（当行星很小时显示）
@@ -72,145 +65,12 @@ export class Planet {
   private currentSegments: number = 32; // 当前分段数（用于平滑过渡）
   private targetSegments: number = 32; // 目标分段数
   
-  // Rotation tracking for pause/resume functionality
-  private lastUpdateTime: number = 0; // Last time updateRotation was called
-  private accumulatedRotation: number = 0; // Accumulated rotation from previous updates
-  
-  /**
-   * 获取累积旋转角度（用于测试和调试）
-   */
-  getAccumulatedRotation(): number {
-    return this.accumulatedRotation;
-  }
 
-  /**
-   * 计算物理正确的自转轴向量
-   * 
-   * 关键修复：自转轴应该在惯性空间（ICRF/J2000）中保持固定方向，
-   * 不随轨道位置变化。这是地球物理的基本原理。
-   * 
-   * @param celestialConfig - 天体配置
-   * @param bodyName - 天体名称
-   * 
-   * @requirements 6.1, 6.2
-   */
-  private computeSpinAxisVector(celestialConfig: CelestialBodyConfig | undefined, bodyName: string): void {
-    // 获取朝向配置
-    const orientationConfig = celestialConfig?.orientation;
-    
-    if (!orientationConfig) {
-      // 没有朝向配置，使用默认值（轴倾角 = 0，即自转轴与轨道法线对齐）
-      this.spinAxisVector = createVector3(0, 0, 1); // 黄道面法线
-      return;
-    }
-
-    // 如果直接提供了 spinAxis，使用它
-    if (orientationConfig.spinAxis) {
-      const [x, y, z] = orientationConfig.spinAxis;
-      this.spinAxisVector = createVector3(x, y, z);
-      return;
-    }
-
-    // 从 obliquityDegrees 计算 spinAxis（使用完整的 axial-tilt physics system）
-    if (orientationConfig.obliquityDegrees !== undefined) {
-      // 使用轨道参数（如果可用）或默认值
-      const inclination = celestialConfig?.inclination || 0;
-      const longitudeOfAscendingNode = celestialConfig?.longitudeOfAscendingNode || 0;
-      
-      // 转换为弧度
-      const inclinationRad = THREE.MathUtils.degToRad(inclination);
-      const loanRad = THREE.MathUtils.degToRad(longitudeOfAscendingNode);
-      const obliquityRad = THREE.MathUtils.degToRad(orientationConfig.obliquityDegrees);
-      
-      // 使用 axial-tilt physics system 计算轨道法线
-      const orbitalNormal = orbitalCalculator.computeOrbitalNormal({
-        inclination: inclinationRad,
-        longitudeOfAscendingNode: loanRad
-      });
-
-      // 计算升交点方向
-      const ascendingNodeDirection = orbitalCalculator.computeAscendingNodeDirection(loanRad);
-
-      // 使用 axial-tilt physics system 计算自转轴
-      this.spinAxisVector = spinAxisCalculator.computeSpinAxis(
-        orbitalNormal,
-        ascendingNodeDirection,
-        obliquityRad
-      );
-    } else {
-      // 没有提供任何朝向信息，使用默认值
-      this.spinAxisVector = createVector3(0, 0, 1); // 黄道面法线
-    }
-  }
-
-  /**
-   * 设置自转轴向量（唯一的公开朝向设置方法）
-   * 
-   * 这是设置行星朝向的唯一公开方法，禁止直接设置欧拉角。
-   * 内部调用 MeshOrientationManager 应用朝向。
-   * 
-   * @param spinAxis - 自转轴向量（ICRF/J2000 坐标系）
-   * 
-   * @requirements 6.2
-   */
-  setSpinAxisVector(spinAxis: AxialTiltVector3): void {
-    // 验证输入是单位向量
-    const magnitude = Math.sqrt(spinAxis.x * spinAxis.x + spinAxis.y * spinAxis.y + spinAxis.z * spinAxis.z);
-    if (Math.abs(magnitude - 1) > 1e-6) {
-      console.warn(`[Planet.setSpinAxisVector] Input vector is not a unit vector. Magnitude: ${magnitude}`);
-      // 归一化向量
-      const normalizedSpinAxis = createVector3(
-        spinAxis.x / magnitude,
-        spinAxis.y / magnitude,
-        spinAxis.z / magnitude
-      );
-      this.spinAxisVector = normalizedSpinAxis;
-    } else {
-      this.spinAxisVector = spinAxis;
-    }
-
-    // 应用新的朝向
-    this.applyInitialOrientation();
-  }
-
-  /**
-   * 获取当前自转轴向量（用于测试和调试）
-   * 
-   * @returns 当前自转轴向量（ICRF/J2000 坐标系），如果未设置则返回 null
-   */
-  getSpinAxisVector(): AxialTiltVector3 | null {
-    return this.spinAxisVector;
-  }
-
-  /**
-   * 应用初始朝向
-   * 使用 MeshOrientationManager 设置网格的初始朝向
-   * 
-   * @requirements 4.2, 4.3, 4.4
-   */
-  private applyInitialOrientation(): void {
-    if (!this.spinAxisVector) {
-      return;
-    }
-
-    // 使用 MeshOrientationManager 应用朝向
-    meshOrientationManager.applySpinAxisOrientation(
-      this.mesh,
-      this.spinAxisVector,
-      DEFAULT_MODEL_CONFIG
-    );
-  }
   
   // Texture support (Render Layer only - does not affect physics)
   private textureLoaded: boolean = false; // 是否已应用贴图
   private textureBodyId: string | null = null; // 贴图对应的 BodyId（用于引用跟踪）
   private planetName: string = ''; // 行星名称（用于贴图查找）
-  // Axial tilt physics system
-  private orientationState: CelestialBodyOrientationState | null = null; // Physical orientation state
-  private spinAxisVector: AxialTiltVector3 | null = null; // Computed spin axis in ICRF/J2000
-  private meshOrientationManagerExtended = createMeshOrientationManagerExtended(); // Extended manager with utility methods
-  private isTidallyLocked: boolean = false; // 是否潮汐锁定
-  private parentBodyName: string | null = null; // 母行星名称（用于潮汐锁定）
   
   // 夜间贴图支持（仅地球）
   private nightTexture: THREE.Texture | null = null;
@@ -265,12 +125,6 @@ export class Planet {
     // 保存行星名称（用于贴图查找）
     this.planetName = bodyInfo.name.toLowerCase();
     
-    // 检查是否为潮汐锁定的卫星
-    if (celestialConfig?.isSatellite && celestialConfig?.parentBody) {
-      this.isTidallyLocked = true;
-      this.parentBodyName = celestialConfig.parentBody;
-    }
-    
     // 使用真实行星半径（AU单位）
     const planetName = bodyInfo.name.toLowerCase();
     this.realRadius = REAL_PLANET_RADII[planetName] || bodyInfo.radius;
@@ -299,18 +153,8 @@ export class Planet {
     // 创建网格
     this.mesh = new THREE.Mesh(this.geometry, this.material);
 
-    // 安装开发模式旋转监控（Requirements 6.3）
-    // 检测直接设置 rotation.x/y/z 的代码，在开发模式下抛出错误
-    installRotationMonitoring(this.mesh, `planet-${bodyInfo.name.toLowerCase()}`);
-
     // 设置渲染顺序：行星应该在轨道和星空之后渲染（正数表示后渲染，会遮挡先渲染的物体）
-    this.mesh.renderOrder = 0; // 默认渲染顺序
-    
-    // 计算物理正确的自转轴向量（使用 axial-tilt physics system）
-    this.computeSpinAxisVector(celestialConfig, bodyInfo.name);
-    
-    // 应用初始朝向（使用 MeshOrientationManager）
-    this.applyInitialOrientation();
+    this.mesh.renderOrder = 0; // 默认渲染顺序;
     
     // 如果是太阳，创建光晕效果（使用屏幕空间 Sprite 替代嵌套球体）
     if (this.isSun && SUN_GLOW_CONFIG.enabled) {
@@ -979,125 +823,26 @@ export class Planet {
   }
 
   /**
-   * 更新星球自转
+   * 更新星球自转（已禁用）
    * @param currentTime 当前时间（天）
    * @param timeSpeed 时间速度倍数
-   * 
-   * 自转实现说明：
-   * 1. 使用 axial-tilt physics system 进行物理正确的自转
-   * 2. 自转绕着物理正确的自转轴进行，而不是绕世界坐标系的 Y 轴
-   * 3. 使用 MeshOrientationManager.applyDailyRotation 应用每日旋转
-   * 4. 旋转轴为物理正确的自转轴，确保符合 Requirements 4.5
-   * 
-   * @requirements 4.5
    */
   updateRotation(currentTime: number, timeSpeed: number = 1): void {
-    // 潮汐锁定的卫星不使用常规自转，而是通过 updateTidalLocking 方法更新朝向
-    if (this.isTidallyLocked) {
-      this.lastUpdateTime = currentTime;
-      return;
-    }
-    
-    if (this.rotationSpeed === 0 || !this.spinAxisVector) {
-      this.lastUpdateTime = currentTime;
-      return;
-    }
-    
-    // Calculate incremental rotation since last update
-    const deltaTime = currentTime - this.lastUpdateTime;
-    
-    // If time is paused (timeSpeed = 0), don't add rotation but update time
-    if (timeSpeed === 0) {
-      this.lastUpdateTime = currentTime;
-      return;
-    }
-
-    const deltaTimeInSeconds = deltaTime * 24 * 3600; // Convert days to seconds
-    const deltaRotation = this.rotationSpeed * deltaTimeInSeconds * timeSpeed;
-    
-    // Accumulate rotation
-    this.accumulatedRotation += deltaRotation;
-    
-    // 重新应用基础朝向（确保幂等性）
-    // 这确保了每次都从正确的基础朝向开始，避免累积误差
-    this.applyInitialOrientation();
-    
-    // 使用 MeshOrientationManager.applyDailyRotation 应用每日旋转
-    // Requirements 4.5: 绕自转轴旋转，不是绕世界坐标系的 Y 轴
-    const spinAxisRender = this.meshOrientationManagerExtended.getSpinAxisInRenderFrame(this.spinAxisVector);
-    this.meshOrientationManagerExtended.applyDailyRotation(
-      this.mesh,
-      spinAxisRender,
-      this.accumulatedRotation
-    );
-    
-    // Update last update time
-    this.lastUpdateTime = currentTime;
-    
-    // Since the grid is a child of the mesh, it will automatically rotate with the planet
-    // This creates the visual effect of the latitude/longitude lines rotating with the planet
+    // 自转功能已禁用，星球保持默认朝向
   }
 
   /**
-   * 更新潮汐锁定卫星的朝向
-   * 潮汐锁定的卫星始终以同一面朝向母行星
-   * 
-   * 实现说明：
-   * 1. 计算从卫星指向母行星的方向向量
-   * 2. 使用物理正确的自转轴向量系统，而非直接的欧拉角
-   * 3. 卫星的 +Z 方向（前方）应该指向母行星
-   * 4. 同时保持轴倾角的影响（通过 spinAxisVector）
-   * 
-   * @param parentPosition - 母行星的世界坐标位置
-   * 
-   * @requirements 6.1, 6.2 - 使用 axial-tilt physics system 替代直接欧拉角设置
-   */
-  updateTidalLocking(parentPosition: THREE.Vector3): void {
-    if (!this.isTidallyLocked || !this.spinAxisVector) return;
-    
-    // 获取卫星当前位置
-    const satellitePosition = this.mesh.position.clone();
-    
-    // 计算从卫星指向母行星的方向向量（在 XZ 平面上）
-    const directionToParent = new THREE.Vector3()
-      .subVectors(parentPosition, satellitePosition);
-    
-    // 计算卫星应该面向的角度（绕 Y 轴）
-    // atan2 返回从正 Z 轴到方向向量的角度
-    const targetRotationY = Math.atan2(directionToParent.x, directionToParent.z);
-    
-    // 使用物理正确的自转轴向量系统
-    // 步骤：
-    // 1. 先应用基础朝向（使用 MeshOrientationManager）
-    // 2. 再应用朝向母行星的旋转
-    
-    // 应用基础朝向（轴倾角）
-    this.applyInitialOrientation();
-    
-    // 创建朝向四元数：绕 Y 轴旋转使卫星面向母行星
-    const facingQuaternion = new THREE.Quaternion();
-    facingQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetRotationY);
-    
-    // 组合四元数：在现有朝向基础上应用面向旋转
-    const currentQuaternion = this.mesh.quaternion.clone();
-    const finalQuaternion = new THREE.Quaternion();
-    finalQuaternion.multiplyQuaternions(facingQuaternion, currentQuaternion);
-    
-    this.mesh.quaternion.copy(finalQuaternion);
-  }
-
-  /**
-   * 检查是否为潮汐锁定的卫星
+   * 检查是否为潮汐锁定的卫星（已禁用）
    */
   getIsTidallyLocked(): boolean {
-    return this.isTidallyLocked;
+    return false;
   }
 
   /**
-   * 获取母行星名称（用于潮汐锁定）
+   * 获取母行星名称（已禁用）
    */
   getParentBodyName(): string | null {
-    return this.parentBodyName;
+    return null;
   }
 
   /**

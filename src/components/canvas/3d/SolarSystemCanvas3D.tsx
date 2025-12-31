@@ -35,7 +35,7 @@ import { Raycaster } from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import ScaleRuler from './ScaleRuler';
 import SettingsMenu from '@/components/SettingsMenu';
-import { ORBIT_COLORS, SUN_LIGHT_CONFIG, ORBIT_CURVE_POINTS, SATELLITE_CONFIG } from '@/lib/config/visualConfig';
+import { ORBIT_COLORS, SUN_LIGHT_CONFIG, ORBIT_CURVE_POINTS, SATELLITE_CONFIG, ORBIT_FADE_CONFIG } from '@/lib/config/visualConfig';
 import { TextureManager } from '@/lib/3d/TextureManager';
 
 // ==================== 可调参数配置 ====================
@@ -441,18 +441,6 @@ export default function SolarSystemCanvas3D() {
             const currentTimeInDays = dateToJulianDay(currentState.currentTime) - 2451545.0; // Days since J2000.0
             planet.updateRotation(currentTimeInDays, currentState.timeSpeed);
             
-            // 更新潮汐锁定卫星的朝向（始终面向母行星）
-            if (planet.getIsTidallyLocked()) {
-              const parentName = planet.getParentBodyName();
-              if (parentName) {
-                const parentBody = currentBodies.find((b: any) => b.name.toLowerCase() === parentName.toLowerCase());
-                if (parentBody) {
-                  const parentPosition = new THREE.Vector3(parentBody.x, parentBody.y, parentBody.z);
-                  planet.updateTidalLocking(parentPosition);
-                }
-              }
-            }
-            
             // 计算相机到星球的距离并更新 LOD
             const planetWorldPos = new THREE.Vector3(body.x, body.y, body.z);
             const cameraPos = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
@@ -469,12 +457,47 @@ export default function SolarSystemCanvas3D() {
               orbit.updatePlanetPosition(planetPosition);
               
               // Update adaptive orbit curve resolution based on camera distance
-              // Calculate distance from camera to orbit center (planet position)
               const orbitCenterDistance = cameraPos.distanceTo(planetPosition);
               if (orbit.updateCurveResolution) {
                 orbit.updateCurveResolution(orbitCenterDistance);
               }
             }
+          }
+        });
+
+        // 计算相机到最近行星的距离，用于所有轨道的渐隐
+        let minDistanceToAnyPlanet = Infinity;
+        currentBodies.forEach((body: any) => {
+          if (body.isSun) return;
+          const planetPos = new THREE.Vector3(body.x, body.y, body.z);
+          const dist = camera.position.distanceTo(planetPos);
+          if (dist < minDistanceToAnyPlanet) {
+            minDistanceToAnyPlanet = dist;
+          }
+        });
+
+        // 根据最近距离计算圆盘和线条的透明度
+        let discOpacity = 1.0;
+        let lineOpacity = 1.0;
+        if (ORBIT_FADE_CONFIG.enabled) {
+          const cfg = ORBIT_FADE_CONFIG;
+          let t = 1.0;
+          if (minDistanceToAnyPlanet <= cfg.fadeEndDistance) {
+            t = 0;
+          } else if (minDistanceToAnyPlanet < cfg.fadeStartDistance) {
+            const range = cfg.fadeStartDistance - cfg.fadeEndDistance;
+            t = (minDistanceToAnyPlanet - cfg.fadeEndDistance) / range;
+          }
+          const discMin = (cfg as any).discMinOpacity ?? 0;
+          const lineMin = (cfg as any).lineMinOpacity ?? 0;
+          discOpacity = discMin + t * (1.0 - discMin);
+          lineOpacity = lineMin + t * (1.0 - lineMin);
+        }
+
+        // 应用透明度到所有行星轨道
+        orbitsRef.current.forEach((orbit) => {
+          if (orbit && orbit.setOpacity) {
+            orbit.setOpacity(discOpacity, lineOpacity);
           }
         });
         

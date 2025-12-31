@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ORBIT_RENDER_CONFIG, ORBIT_STYLE_CONFIG } from '@/lib/config/visualConfig';
+import { ORBIT_RENDER_CONFIG, SATELLITE_ORBIT_STYLE_CONFIG, SATELLITE_ORBIT_FADE_CONFIG } from '@/lib/config/visualConfig';
 
 /**
  * 卫星轨道渲染类（支持母行星轴倾角的动态轨道平面）
@@ -103,16 +103,14 @@ export class SatelliteOrbit {
     });
     this.visualObjects = [];
 
-    if (ORBIT_STYLE_CONFIG.style === 'filled') {
-      // 创建填充圆盘
+    const cfg = SATELLITE_ORBIT_STYLE_CONFIG;
+    if (cfg.style === 'filled') {
       const mesh = this.createFilledMesh();
       if (mesh) {
         this.root.add(mesh);
         this.visualObjects.push(mesh);
       }
-      
-      // 如果配置了同时显示线条
-      if (ORBIT_STYLE_CONFIG.showLine) {
+      if (cfg.showLine) {
         const line = this.createLine();
         if (line) {
           this.root.add(line);
@@ -120,7 +118,6 @@ export class SatelliteOrbit {
         }
       }
     } else {
-      // 仅线条模式
       const line = this.createLine();
       if (line) {
         this.root.add(line);
@@ -146,7 +143,7 @@ export class SatelliteOrbit {
     
     const gradient = context.createLinearGradient(0, 64, 0, 0);
     gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    gradient.addColorStop(1, `rgba(255, 255, 255, ${ORBIT_STYLE_CONFIG.fillAlpha})`);
+    gradient.addColorStop(1, `rgba(255, 255, 255, ${SATELLITE_ORBIT_STYLE_CONFIG.fillAlpha})`);
     
     context.fillStyle = gradient;
     context.fillRect(0, 0, 2, 64);
@@ -173,35 +170,27 @@ export class SatelliteOrbit {
     const uvs = new Float32Array(vertexCount * 2 * 2);
     const indices: number[] = [];
 
-    const innerRatio = ORBIT_STYLE_CONFIG.innerRadiusRatio;
+    const innerRatio = SATELLITE_ORBIT_STYLE_CONFIG.innerRadiusRatio;
 
     for (let i = 0; i < vertexCount; i++) {
       const point = this.points[i];
-      
-      // 外顶点（原始点）
       positions[i * 6] = point.x;
       positions[i * 6 + 1] = point.y;
       positions[i * 6 + 2] = point.z;
-      
-      // 内顶点（向中心缩放）
       positions[i * 6 + 3] = point.x * innerRatio;
       positions[i * 6 + 4] = point.y * innerRatio;
       positions[i * 6 + 5] = point.z * innerRatio;
-
-      // UV 坐标
       uvs[i * 4] = 0;
-      uvs[i * 4 + 1] = 1; // V=1 (外边缘)
+      uvs[i * 4 + 1] = 1;
       uvs[i * 4 + 2] = 0;
-      uvs[i * 4 + 3] = 0; // V=0 (内边缘)
+      uvs[i * 4 + 3] = 0;
     }
 
-    // 创建三角形索引
     for (let i = 0; i < vertexCount - 1; i++) {
       const outerCurrent = 2 * i;
       const innerCurrent = 2 * i + 1;
       const outerNext = 2 * (i + 1);
       const innerNext = 2 * (i + 1) + 1;
-      
       indices.push(outerCurrent, innerCurrent, outerNext);
       indices.push(innerCurrent, innerNext, outerNext);
     }
@@ -219,7 +208,6 @@ export class SatelliteOrbit {
       side: THREE.DoubleSide,
       depthWrite: false,
       depthTest: true,
-      blending: THREE.NormalBlending,
     });
 
     return new THREE.Mesh(geometry, material);
@@ -230,16 +218,14 @@ export class SatelliteOrbit {
    */
   private createLine(): THREE.Line | null {
     if (this.points.length < 2) return null;
-
-    const geometry = new THREE.BufferGeometry().setFromPoints(this.points);
     
-    const lineOpacity = ORBIT_STYLE_CONFIG.style === 'filled' && ORBIT_STYLE_CONFIG.showLine 
-      ? (ORBIT_STYLE_CONFIG.lineOpacity ?? 0.5) 
-      : 1.0;
+    const geometry = new THREE.BufferGeometry().setFromPoints(this.points);
+    const cfg = SATELLITE_ORBIT_STYLE_CONFIG;
+    const lineOpacity = cfg.style === 'filled' && cfg.showLine ? cfg.lineOpacity : 1.0;
 
     const material = new THREE.LineBasicMaterial({
       color: new THREE.Color(this.color),
-      transparent: lineOpacity < 1.0,
+      transparent: true,
       opacity: lineOpacity,
       linewidth: ORBIT_RENDER_CONFIG.lineWidth,
       depthWrite: true,
@@ -250,7 +236,7 @@ export class SatelliteOrbit {
   }
 
   /**
-   * 设置正确的轨道朝向（基于母行星轴倾角，一次性设置）
+   * 设置正确的轨道朝向（已禁用 - 使用默认朝向）
    */
   private setCorrectOrientation(): void {
     if (this.isOrientationSet || !this.parentBodyName) return;
@@ -260,33 +246,8 @@ export class SatelliteOrbit {
       return;
     }
     
-    try {
-      const { CELESTIAL_BODIES } = require('@/lib/types/celestialTypes');
-      const parentConfig = CELESTIAL_BODIES[this.parentBodyName];
-      
-      if (parentConfig && parentConfig.orientation && parentConfig.orientation.spinAxis) {
-        const [x, y, z] = parentConfig.orientation.spinAxis;
-        
-        const spinAxisICRF = new THREE.Vector3(x, y, z);
-        const spinAxisRender = new THREE.Vector3(
-          spinAxisICRF.x,
-          spinAxisICRF.z,
-          -spinAxisICRF.y
-        );
-        
-        const defaultNormal = new THREE.Vector3(0, 0, 1);
-        const targetNormal = spinAxisRender.normalize();
-        
-        const parentAxisQuaternion = new THREE.Quaternion();
-        parentAxisQuaternion.setFromUnitVectors(defaultNormal, targetNormal);
-        
-        // 应用变换到整个组
-        this.root.quaternion.copy(parentAxisQuaternion);
-        this.isOrientationSet = true;
-      }
-    } catch (error) {
-      console.warn(`Failed to set orbit orientation for ${this.parentBodyName}:`, error);
-    }
+    // 轴倾角功能已禁用，使用默认朝向
+    this.isOrientationSet = true;
   }
 
   /**
@@ -306,16 +267,47 @@ export class SatelliteOrbit {
   /**
    * 更新轨道透明度（用于渐隐效果）
    */
-  setOpacity(opacity: number): void {
-    this.visualObjects.forEach(obj => {
-      if (obj instanceof THREE.Mesh || obj instanceof THREE.Line) {
-        const material = obj.material as THREE.Material;
-        if (material && 'opacity' in material) {
-          material.opacity = opacity;
-          material.transparent = opacity < 1.0;
-        }
+  /**
+   * 设置轨道透明度
+   * @param discOpacity 圆盘透明度
+   * @param lineOpacity 线条透明度
+   */
+  setOpacity(discOpacity: number, lineOpacity?: number): void {
+    const lineOp = lineOpacity ?? discOpacity;
+    for (const obj of this.visualObjects) {
+      if (obj instanceof THREE.Mesh) {
+        const mat = obj.material as THREE.Material & { opacity: number };
+        mat.opacity = discOpacity;
+        mat.transparent = true;
+        obj.visible = discOpacity > 0.01;
+      } else if (obj instanceof THREE.Line) {
+        const mat = obj.material as THREE.Material & { opacity: number };
+        mat.opacity = lineOp;
+        mat.transparent = true;
+        obj.visible = lineOp > 0.01;
       }
-    });
+    }
+  }
+
+  /**
+   * 根据相机距离更新轨道透明度
+   */
+  updateVisibility(cameraDistance: number): void {
+    if (!SATELLITE_ORBIT_FADE_CONFIG.enabled) return;
+
+    const cfg = SATELLITE_ORBIT_FADE_CONFIG;
+    let t = 1.0;
+    
+    if (cameraDistance <= cfg.fadeEndDistance) {
+      t = 0;
+    } else if (cameraDistance < cfg.fadeStartDistance) {
+      const range = cfg.fadeStartDistance - cfg.fadeEndDistance;
+      t = (cameraDistance - cfg.fadeEndDistance) / range;
+    }
+
+    const discOp = (cfg.discMinOpacity ?? 0) + t * (1.0 - (cfg.discMinOpacity ?? 0));
+    const lineOp = (cfg.lineMinOpacity ?? 0) + t * (1.0 - (cfg.lineMinOpacity ?? 0));
+    this.setOpacity(discOp, lineOp);
   }
 
   dispose(): void {

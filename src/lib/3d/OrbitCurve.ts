@@ -13,21 +13,26 @@
 
 import * as THREE from 'three';
 import type { OrbitalElements } from '@/lib/astronomy/orbit';
-import { ORBIT_GRADIENT_CONFIG, ORBIT_RENDER_CONFIG, ORBIT_STYLE_CONFIG, ORBIT_DISC_FADE_CONFIG } from '@/lib/config/visualConfig';
+import { ORBIT_GRADIENT_CONFIG, ORBIT_RENDER_CONFIG, ORBIT_STYLE_CONFIG, ORBIT_FADE_CONFIG } from '@/lib/config/visualConfig';
 
 export class OrbitCurve {
   private root: THREE.Group;
   private visualObjects: THREE.Object3D[] = [];
   private curve!: THREE.CatmullRomCurve3;
   private points: THREE.Vector3[] = [];
-  private planetPosition: THREE.Vector3 | null = null; // 行星当前位置（用于计算渐变方向）
-  private orbitColor: string; // 保存轨道颜色字符串
+  private planetPosition: THREE.Vector3 | null = null;
+  private orbitColor: string;
   
   // Adaptive resolution properties
-  private elements: OrbitalElements; // Store orbital elements for regeneration
-  private currentResolution: number = 300; // Current curve resolution
-  private lastCameraDistance: number = 0; // Last camera distance for change detection
-  private resolutionUpdateThreshold: number = 0.1; // Minimum distance change to trigger update
+  private elements: OrbitalElements;
+  private currentResolution: number = 300;
+  private lastCameraDistance: number = 0;
+  private resolutionUpdateThreshold: number = 0.1;
+  private julianDay?: number;
+  
+  // 保存当前透明度状态
+  private currentDiscOpacity: number = 1.0;
+  private currentLineOpacity: number = 1.0;
 
   constructor(
     elements: OrbitalElements,
@@ -37,20 +42,13 @@ export class OrbitCurve {
     planetPosition?: THREE.Vector3
   ) {
     this.root = new THREE.Group();
-    // Store orbital elements for adaptive resolution
     this.elements = elements;
-    
-    // 保存轨道颜色和行星位置（确保颜色有默认值）
     this.orbitColor = color || '#ffffff';
     this.planetPosition = planetPosition || null;
-    
-    // Initialize adaptive resolution
     this.currentResolution = segments;
+    this.julianDay = julianDay;
     
-    // 生成轨道点
     this.generatePoints(elements, segments, julianDay);
-
-    // 创建可视化对象
     this.createVisualObject();
   }
 
@@ -379,7 +377,7 @@ export class OrbitCurve {
    * @param cameraDistance Current camera distance from orbit center
    */
   updateCurveResolution(cameraDistance: number): void {
-    this.updateDiscVisibility(cameraDistance);
+    // 不再在这里更新透明度，由全局统一控制
 
     // Check if distance change is significant enough to warrant update
     const distanceChange = Math.abs(cameraDistance - this.lastCameraDistance);
@@ -403,56 +401,49 @@ export class OrbitCurve {
   }
 
   /**
-   * Update disc visibility based on camera distance
+   * Update orbit visibility based on camera distance
    */
   private updateDiscVisibility(cameraDistance: number): void {
-    if (!ORBIT_DISC_FADE_CONFIG.enabled) return;
+    // 已废弃，透明度由全局统一控制
+  }
 
-    // Find filled mesh object
-    const meshObj = this.visualObjects.find(obj => obj instanceof THREE.Mesh) as THREE.Mesh | undefined;
-    if (!meshObj || !meshObj.material) return;
+  /**
+   * 设置轨道透明度（供外部调用）
+   */
+  setOpacity(discOpacity: number, lineOpacity?: number): void {
+    this.currentDiscOpacity = discOpacity;
+    this.currentLineOpacity = lineOpacity ?? discOpacity;
+    this.applyCurrentOpacity();
+  }
 
-    const material = meshObj.material as THREE.MeshBasicMaterial;
-    
-    // Calculate opacity based on distance
-    // Distance is in AU (same units as orbit radius usually)
-    // But cameraDistance passed here is usually World Units.
-    // Assuming 1 AU = 1 World Unit in this visualization context?
-    // Let's check SceneManager or similar. Usually they match.
-    
-    let opacity = 1.0;
-    
-    if (cameraDistance < ORBIT_DISC_FADE_CONFIG.fadeEndDistance) {
-        opacity = 0;
-    } else if (cameraDistance < ORBIT_DISC_FADE_CONFIG.fadeStartDistance) {
-        // Linear fade: 0 at end, 1 at start
-        const range = ORBIT_DISC_FADE_CONFIG.fadeStartDistance - ORBIT_DISC_FADE_CONFIG.fadeEndDistance;
-        opacity = (cameraDistance - ORBIT_DISC_FADE_CONFIG.fadeEndDistance) / range;
+  private applyCurrentOpacity(): void {
+    for (const obj of this.visualObjects) {
+      if (obj instanceof THREE.Mesh) {
+        const mat = obj.material as THREE.MeshBasicMaterial;
+        mat.opacity = this.currentDiscOpacity;
+        obj.visible = this.currentDiscOpacity > 0.01;
+      } else if (obj instanceof THREE.Line) {
+        const mat = obj.material as THREE.LineBasicMaterial;
+        mat.opacity = this.currentLineOpacity;
+        mat.transparent = true;
+        obj.visible = this.currentLineOpacity > 0.01;
+      }
     }
-    
-    // Apply max opacity factor
-    // Note: The material opacity is multiplied by the texture alpha channel.
-    // We adjust the material opacity directly.
-    // However, the original material opacity was 1.0.
-    // If we want to support base opacity changes, we might need to store it.
-    // For now, assuming 1.0 is the base.
-    
-    material.opacity = opacity;
-    material.visible = opacity > 0.01;
+  }
+
+  private applyOpacity(opacity: number): void {
+    this.setOpacity(opacity);
   }
 
   /**
    * Regenerate curve with current resolution
    */
   private regenerateCurve(): void {
-    // Generate new points with current resolution
-    this.generatePoints(this.elements, this.currentResolution);
-    
-    // Create new curve
+    this.generatePoints(this.elements, this.currentResolution, this.julianDay);
     this.curve = new THREE.CatmullRomCurve3(this.points, true);
-    
-    // Recreate visual object
     this.createVisualObject();
+    // 恢复透明度状态
+    this.applyCurrentOpacity();
   }
 
   /**
@@ -689,11 +680,8 @@ export class OrbitCurve {
   }
 
   /**
-   * Generate orbit points using the original proven method
-   * This maintains the correct orbital shape while allowing for adaptive resolution
-   * 
-   * ⚠️ 关键修复：使用与行星位置计算相同的时间演化轨道元素
-   * 这确保了轨道曲线与行星位置完全对齐
+   * 生成轨道点 - 使用与 orbit.ts calculatePosition 完全相同的坐标变换
+   * 确保轨道曲线与行星位置精确对齐
    */
   private generatePointsWithKeplerianAccuracy(
     elements: OrbitalElements,
@@ -702,8 +690,7 @@ export class OrbitCurve {
   ): void {
     this.points = [];
 
-    // 如果提供了 julianDay，计算时间演化后的轨道元素
-    // 这与 orbit.ts 中的 calculatePosition 使用相同的方法
+    // 时间演化轨道元素（与 orbit.ts 相同）
     let elem = elements;
     if (julianDay) {
       const T = (julianDay - 2451545.0) / 36525.0;
@@ -718,52 +705,37 @@ export class OrbitCurve {
       };
     }
 
-    // 轨道平面旋转：使用标准轨道六根数
-    // i: 倾角, O: 升交点黄经, w_bar: 近日点黄经
-    // ω = w_bar - O 为近地点辐角
-    const iRad = elem.i;
-    const ORad = elem.O;
-    const omega = elem.w_bar - elem.O;
-
-    const cosO = Math.cos(ORad);
-    const sinO = Math.sin(ORad);
-    const cosI = Math.cos(iRad);
-    const sinI = Math.sin(iRad);
+    // 使用与 orbit.ts calculatePosition 完全相同的变换矩阵
+    const w = elem.w_bar - elem.O;
+    const cos_w = Math.cos(w);
+    const sin_w = Math.sin(w);
+    const cos_O = Math.cos(elem.O);
+    const sin_O = Math.sin(elem.O);
+    const cos_i = Math.cos(elem.i);
+    const sin_i = Math.sin(elem.i);
 
     for (let idx = 0; idx <= segments; idx++) {
-      // 使用真近点角 f 从 0~2π 采样椭圆
-      const f = (idx / segments) * Math.PI * 2;
+      const nu = (idx / segments) * Math.PI * 2;
+      const r = (elem.a * (1 - elem.e * elem.e)) / (1 + elem.e * Math.cos(nu));
+      const x_orb = r * Math.cos(nu);
+      const y_orb = r * Math.sin(nu);
 
-      // 极坐标下的轨道半径
-      const r =
-        (elem.a * (1 - elem.e * elem.e)) /
-        (1 + elem.e * Math.cos(f));
-
-      // 在轨道平面（近拱点坐标系）中的坐标
-      const cosU = Math.cos(omega + f);
-      const sinU = Math.sin(omega + f);
-
-      // 将轨道平面坐标旋转到黄道坐标系
-      // 参考标准公式：
-      // x = r [cosΩ cos(ω+f) − sinΩ sin(ω+f) cosi]
-      // y = r [sinΩ cos(ω+f) + cosΩ sin(ω+f) cosi]
-      // z = r [sin(ω+f) sini]
-      const x =
-        r * (cosO * cosU - sinO * sinU * cosI);
-      const y =
-        r * (sinO * cosU + cosO * sinU * cosI);
-      const z =
-        r * (sinU * sinI);
+      // 与 orbit.ts 完全相同的坐标变换
+      const x = (cos_w * cos_O - sin_w * sin_O * cos_i) * x_orb +
+                (-sin_w * cos_O - cos_w * sin_O * cos_i) * y_orb;
+      const y = (cos_w * sin_O + sin_w * cos_O * cos_i) * x_orb +
+                (-sin_w * sin_O + cos_w * cos_O * cos_i) * y_orb;
+      const z = (sin_w * sin_i) * x_orb + (cos_w * sin_i) * y_orb;
 
       this.points.push(new THREE.Vector3(x, y, z));
     }
-    
-    // Ensure orbit is completely closed
+
+    // 闭合轨道
     if (this.points.length > 1) {
-      const firstPoint = this.points[0];
-      const lastPoint = this.points[this.points.length - 1];
-      if (firstPoint.distanceTo(lastPoint) > 0.001) {
-        this.points.push(firstPoint.clone()); // Add first point copy to ensure closure
+      const first = this.points[0];
+      const last = this.points[this.points.length - 1];
+      if (first.distanceTo(last) > 0.0001) {
+        this.points.push(first.clone());
       }
     }
   }

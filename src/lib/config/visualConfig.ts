@@ -122,57 +122,65 @@ export const ORBIT_GRADIENT_CONFIG = {
 };
 
 /**
- * 轨道样式配置
- * - style: 'line' | 'filled'
- *   - 'line': 传统线条轨道
- *   - 'filled': 填充圆盘/环形轨道，中心透明，边缘清晰
- * - showLine: 是否在 filled 模式下同时显示轨道线条
- * - lineOpacity: 线条的不透明度
- * - fillAlpha: 填充模式下边缘的最大不透明度
- * - innerRadiusRatio: 填充模式下内圈（透明）半径占外圈半径的比例 (0-1)
- *   设置为 0.8 表示从 80% 处开始渐变到 100% 处。
+ * 行星轨道样式配置
  */
 export const ORBIT_STYLE_CONFIG = {
-  style: 'filled',
-  showLine: true, // 同时显示线条
-  lineOpacity: 1, // 线条透明度
-  fillAlpha: 0.3, // 边缘清晰
-  innerRadiusRatio: 0.5, // 稍微宽一点，确保覆盖内部
+  style: 'filled' as 'line' | 'filled',
+  showLine: true,
+  lineOpacity: 1,
+  fillAlpha: 0.3,
+  innerRadiusRatio: 0.5,
+};
+
+/**
+ * 卫星轨道样式配置
+ */
+export const SATELLITE_ORBIT_STYLE_CONFIG = {
+  style: 'filled' as 'line' | 'filled',
+  showLine: true,
+  lineOpacity: 0.8,
+  fillAlpha: 0.25,
+  innerRadiusRatio: 0.6,
 };
 
 /**
  * 轨道渲染配置
- * ⚠️ 注意：WebGL 在大多数现代浏览器中不支持 lineWidth > 1
- * 这是 WebGL 规范的限制，不是 Three.js 或本项目的问题
- * 如需粗线条效果，建议使用 'filled' 样式（圆盘填充）
  */
 export const ORBIT_RENDER_CONFIG = {
-  lineWidth: 1, // WebGL 限制：大多数浏览器只支持 1
+  lineWidth: 1,
 };
 
 /**
- * 轨道圆盘渐隐配置
- * 控制轨道圆盘在相机靠近行星时自动渐隐，避免遮挡视线
- * - fadeStartDistance: 渐隐开始距离（AU），小于此距离开始变透明
- * - fadeEndDistance: 渐隐结束距离（AU），小于此距离完全透明
- * - maxOpacity: 圆盘的最大不透明度（会乘以 ORBIT_STYLE_CONFIG.fillAlpha）
+ * 行星轨道渐隐配置
+ * 当相机靠近任意行星时，所有行星轨道逐渐变透明
  */
-export const ORBIT_DISC_FADE_CONFIG = {
+export const ORBIT_FADE_CONFIG = {
   enabled: true,
-  fadeStartDistance: 0.8, //  开始渐隐
-  fadeEndDistance: 0.005,   // 完全透明
+  fadeStartDistance: 0.005,
+  fadeEndDistance: 0.0005,
+  discMinOpacity: 0,       // 圆盘完全隐藏
+  lineMinOpacity: 0.3,    // 线条保持可见
 };
+
+/**
+ * 卫星轨道渐隐配置
+ */
+export const SATELLITE_ORBIT_FADE_CONFIG = {
+  enabled: true,
+  fadeStartDistance: 0.001,
+  fadeEndDistance: 0.00005,
+  discMinOpacity: 0,
+  lineMinOpacity: 0.2,
+};
+
+// 向后兼容
+export const ORBIT_DISC_FADE_CONFIG = ORBIT_FADE_CONFIG;
 
 /**
  * 相机相关配置
- * - minDistanceToBody: 距行星/卫星的最小安全距离（世界单位），防止相机穿透天体导致黑圆
- * - initialTiltDeg: 初始视角俯仰角（度），默认从接近垂直俯视过渡到此角度
- * - initialTransitionSec: 首次加载时从俯视到斜视的动画时长（秒）
- * 
- * 注意：详细的相机配置已移至 cameraConfig.ts，此处保留基础配置以兼容旧代码
  */
 export const CAMERA_CONFIG = {
-  minDistanceToBody: 0.002, // 以天体半径为参考的比例（在代码中会乘以目标半径）
+  minDistanceToBody: 0.002,
   initialTiltDeg: 30,
   initialTransitionSec: 1.2,
 };
@@ -332,54 +340,6 @@ export const PLANET_GRID_CONFIG = {
   segments: 96,
   outwardOffset: 0.002, // 使用相对于半径的比例（0.2%），而不是绝对值
 };
-
-/**
- * 行星轴倾角配置（Axial Tilt / Obliquity）
- * 
- * 定义每个行星相对于黄道面的轴倾角（度）
- * 用于正确显示行星贴图的南北极方向
- * 
- * 注意：
- * - 正值表示北极向黄道面北方倾斜
- * - 负值或大于90度表示逆行自转（如金星、天王星）
- * - 这是渲染层配置，不影响物理计算
- * 
- * 数据来源：NASA Planetary Fact Sheet
- */
-export const PLANET_AXIAL_TILT: Record<string, number> = {
-  // 太阳轴倾角约 7.25°（相对于黄道面）
-  sun: 7.25,
-  
-  // 八大行星
-  mercury: 0.034,    // 几乎无倾斜
-  venus: 177.4,      // 逆行自转，几乎倒置
-  earth: 23.44,      // 地球轴倾角
-  mars: 25.19,       // 与地球相似
-  jupiter: 3.13,     // 几乎直立
-  saturn: 26.73,     // 与地球相似
-  uranus: 97.77,     // 几乎躺着转
-  neptune: 28.32,    // 与地球相似
-  
-  // 卫星（相对于其轨道面）
-  moon: 6.68,        // 月球轴倾角
-  io: 0.05,          // 潮汐锁定，几乎无倾斜
-  europa: 0.1,
-  ganymede: 0.33,
-  callisto: 0.0,
-  titan: 0.3,
-  enceladus: 0.0,
-  miranda: 0.0,
-  ariel: 0.0,
-  umbriel: 0.0,
-  titania: 0.0,
-  
-  // 矮行星
-  ceres: 4.0,
-  eris: 78.0,        // 高倾角
-  haumea: 126.0,     // 逆行
-  makemake: 0.0,     // 未知，假设为 0
-};
-
 
 /**
  * ==================== 行星贴图系统配置 ====================
