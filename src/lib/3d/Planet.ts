@@ -17,7 +17,7 @@
 
 import * as THREE from 'three';
 import type { CelestialBody } from '@/lib/astronomy/orbit';
-import { CelestialBodyConfig, rotationPeriodToSpeed } from '@/lib/types/celestialTypes';
+import { CelestialBodyConfig, rotationPeriodToSpeed, calculateRotationAxis, CELESTIAL_BODIES } from '@/lib/types/celestialTypes';
 import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS, PLANET_LOD_CONFIG, PLANET_GRID_CONFIG, PLANET_LIGHTING_CONFIG, getCelestialMaterialParams, SATURN_RING_CONFIG } from '@/lib/config/visualConfig';
 
 // 真实行星半径（AU单位）
@@ -65,6 +65,10 @@ export class Planet {
   private currentSegments: number = 32; // 当前分段数（用于平滑过渡）
   private targetSegments: number = 32; // 目标分段数
   
+  // Axial tilt (rotation axis orientation)
+  private rotationAxis: THREE.Vector3; // Unit vector pointing to north pole in ecliptic coordinates
+  private axialTilt: number = 0; // Obliquity in degrees
+  private axialTiltApplied: boolean = false; // Whether axial tilt has been applied to mesh
 
   
   // Texture support (Render Layer only - does not affect physics)
@@ -129,6 +133,24 @@ export class Planet {
     const planetName = bodyInfo.name.toLowerCase();
     this.realRadius = REAL_PLANET_RADII[planetName] || bodyInfo.radius;
     
+    // Initialize axial tilt from celestial body data
+    // Default rotation axis points to ecliptic north (Y-up in Three.js)
+    this.rotationAxis = new THREE.Vector3(0, 1, 0);
+    this.axialTilt = 0;
+    
+    // Get axial tilt data from CELESTIAL_BODIES or celestialConfig
+    const bodyData = CELESTIAL_BODIES[planetName];
+    if (bodyData && bodyData.northPoleRA !== undefined && bodyData.northPoleDec !== undefined) {
+      // Calculate rotation axis from north pole coordinates
+      const axis = calculateRotationAxis(bodyData.northPoleRA, bodyData.northPoleDec);
+      this.rotationAxis = new THREE.Vector3(axis.x, axis.y, axis.z).normalize();
+      this.axialTilt = bodyData.axialTilt || 0;
+    } else if (celestialConfig?.northPoleRA !== undefined && celestialConfig?.northPoleDec !== undefined) {
+      const axis = calculateRotationAxis(celestialConfig.northPoleRA, celestialConfig.northPoleDec);
+      this.rotationAxis = new THREE.Vector3(axis.x, axis.y, axis.z).normalize();
+      this.axialTilt = celestialConfig.axialTilt || 0;
+    }
+    
     // 使用真实半径创建行星
     const radius = this.realRadius;
 
@@ -156,6 +178,10 @@ export class Planet {
     // 设置渲染顺序：行星应该在轨道和星空之后渲染（正数表示后渲染，会遮挡先渲染的物体）
     this.mesh.renderOrder = 0; // 默认渲染顺序;
     
+    // Apply axial tilt to mesh orientation
+    // This orients the planet so its rotation axis points in the correct direction
+    this.applyAxialTilt();
+    
     // 如果是太阳，创建光晕效果（使用屏幕空间 Sprite 替代嵌套球体）
     if (this.isSun && SUN_GLOW_CONFIG.enabled) {
       this.createSunGlow();
@@ -173,8 +199,48 @@ export class Planet {
     }
   }
 
-
   /**
+   * Apply axial tilt to the planet mesh
+   * 
+   * This rotates the mesh so that its local Z-axis (rotation axis) points
+   * in the direction of the planet's north pole in ecliptic coordinates.
+   * 
+   * Reference frame (scene coordinates = ecliptic coordinates):
+   * - X axis: points to vernal equinox
+   * - Y axis: in ecliptic plane, perpendicular to X
+   * - Z axis: points to ecliptic north pole
+   * 
+   * Default sphere in Three.js has Y-axis as the rotation axis (poles at +Y and -Y).
+   * We need to rotate the mesh so that its local Y-axis aligns with the planet's
+   * actual rotation axis direction.
+   * 
+   * The rotation is applied using quaternion to avoid gimbal lock.
+   */
+  private applyAxialTilt(): void {
+    if (this.axialTiltApplied) return;
+    
+    // Default rotation axis for Three.js sphere is Y-up (local Y axis)
+    const defaultAxis = new THREE.Vector3(0, 1, 0);
+    
+    // Target rotation axis (planet's north pole direction in scene coordinates)
+    // For a planet with no tilt, this would be (0, 0, 1) - pointing to ecliptic north
+    const targetAxis = this.rotationAxis.clone().normalize();
+    
+    // If rotation axis is already aligned with default, no rotation needed
+    if (targetAxis.distanceTo(defaultAxis) < 0.001) {
+      this.axialTiltApplied = true;
+      return;
+    }
+    
+    // Calculate quaternion to rotate from default axis to target rotation axis
+    const quaternion = new THREE.Quaternion();
+    quaternion.setFromUnitVectors(defaultAxis, targetAxis);
+    
+    // Apply rotation to mesh
+    this.mesh.quaternion.copy(quaternion);
+    
+    this.axialTiltApplied = true;
+  }  /**
    * 创建行星着色器材质
    * 实现真实的太阳光照效果：
    * - 向阳面亮，背阳面暗
@@ -823,12 +889,52 @@ export class Planet {
   }
 
   /**
-   * 更新星球自转（已禁用）
-   * @param currentTime 当前时间（天）
-   * @param timeSpeed 时间速度倍数
+   * 更新星球自转
+   * 
+   * 自转围绕行星的自转轴进行，自转轴由 axialTilt 和 northPole 坐标决定。
+   * 由于我们已经通过 applyAxialTilt() 将网格旋转到正确的朝向，
+   * 自转只需要围绕网格的本地 Y 轴进行。
+   * 
+   * 使用绝对时间计算旋转角度，确保暂停后恢复时位置正确。
+   * 
+   * @param currentTimeInDays 当前时间（从 J2000.0 起的天数）
+   * @param timeSpeed 时间速度倍数（未使用，保留接口兼容性）
+   * @param isPlaying 是否正在播放（可选，默认 true）
    */
-  updateRotation(currentTime: number, timeSpeed: number = 1): void {
-    // 自转功能已禁用，星球保持默认朝向
+  updateRotation(currentTimeInDays: number, timeSpeed: number = 1, isPlaying: boolean = true): void {
+    if (this.rotationSpeed === 0) return;
+    
+    // 计算基于绝对时间的旋转角度
+    // rotationSpeed 是弧度/秒
+    // currentTimeInDays 是从 J2000.0 起的天数
+    // 转换为秒：days * 24 * 3600
+    const timeInSeconds = currentTimeInDays * 24 * 3600;
+    
+    // 计算总旋转角度（弧度）
+    const totalRotation = this.rotationSpeed * timeInSeconds;
+    
+    // 获取当前的轴倾角四元数（applyAxialTilt 设置的）
+    // 我们需要在此基础上添加自转
+    if (!this.axialTiltApplied) {
+      this.applyAxialTilt();
+    }
+    
+    // 创建自转四元数（围绕本地 Y 轴）
+    const rotationQuaternion = new THREE.Quaternion();
+    rotationQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), totalRotation);
+    
+    // 先应用轴倾角，再应用自转
+    // 轴倾角四元数
+    const defaultAxis = new THREE.Vector3(0, 1, 0);
+    const tiltQuaternion = new THREE.Quaternion();
+    tiltQuaternion.setFromUnitVectors(defaultAxis, this.rotationAxis);
+    
+    // 组合：先自转，再倾斜
+    // mesh.quaternion = tiltQuaternion * rotationQuaternion
+    const finalQuaternion = new THREE.Quaternion();
+    finalQuaternion.multiplyQuaternions(tiltQuaternion, rotationQuaternion);
+    
+    this.mesh.quaternion.copy(finalQuaternion);
   }
 
   /**
@@ -843,6 +949,20 @@ export class Planet {
    */
   getParentBodyName(): string | null {
     return null;
+  }
+
+  /**
+   * 获取自转轴方向（单位向量，指向北极）
+   */
+  getRotationAxis(): THREE.Vector3 {
+    return this.rotationAxis.clone();
+  }
+
+  /**
+   * 获取自转轴倾角（度）
+   */
+  getAxialTilt(): number {
+    return this.axialTilt;
   }
 
   /**

@@ -22,6 +22,12 @@ export interface CelestialBodyConfig {
   // Rotation parameters
   rotationPeriod: number; // Rotation period in hours (negative for retrograde)
   
+  // Axial tilt parameters (J2000.0 epoch)
+  // Reference: NASA Planetary Fact Sheets
+  axialTilt: number; // Obliquity to orbit in degrees (angle between rotation axis and orbit normal)
+  northPoleRA: number; // North pole right ascension in degrees (J2000.0)
+  northPoleDec: number; // North pole declination in degrees (J2000.0)
+  
   // Satellite properties
   isSatellite?: boolean;
   parentBody?: string; // Parent body name for satellites
@@ -30,6 +36,85 @@ export interface CelestialBodyConfig {
 export interface RotationConfig {
   rotationPeriod: number; // Rotation period in hours
   rotationSpeed: number; // Calculated rotation speed in radians per second
+}
+
+/**
+ * Axial tilt configuration for a celestial body
+ * Used to orient the rotation axis in 3D space
+ */
+export interface AxialTiltConfig {
+  axialTilt: number; // Obliquity in degrees
+  northPoleRA: number; // North pole right ascension in degrees
+  northPoleDec: number; // North pole declination in degrees
+}
+
+/**
+ * Convert equatorial coordinates (RA, Dec) to ecliptic coordinates
+ * 
+ * @param ra Right ascension in degrees
+ * @param dec Declination in degrees
+ * @param obliquity Earth's obliquity (23.4393 degrees for J2000.0)
+ * @returns Ecliptic longitude and latitude in radians
+ */
+export function equatorialToEcliptic(ra: number, dec: number, obliquity: number = 23.4393): { lon: number; lat: number } {
+  const raRad = ra * Math.PI / 180;
+  const decRad = dec * Math.PI / 180;
+  const oblRad = obliquity * Math.PI / 180;
+  
+  const sinDec = Math.sin(decRad);
+  const cosDec = Math.cos(decRad);
+  const sinRA = Math.sin(raRad);
+  const cosRA = Math.cos(raRad);
+  const sinObl = Math.sin(oblRad);
+  const cosObl = Math.cos(oblRad);
+  
+  // Ecliptic latitude (beta)
+  const sinLat = sinDec * cosObl - cosDec * sinObl * sinRA;
+  const lat = Math.asin(Math.max(-1, Math.min(1, sinLat)));
+  
+  // Ecliptic longitude (lambda)
+  const y = sinRA * cosObl + Math.tan(decRad) * sinObl;
+  const x = cosRA;
+  const lon = Math.atan2(y, x);
+  
+  return { lon, lat };
+}
+
+/**
+ * Calculate the rotation axis direction vector in scene coordinates
+ * 
+ * Scene coordinate system (same as orbit calculation output):
+ * - X axis: points to vernal equinox (ecliptic longitude 0°)
+ * - Y axis: in ecliptic plane, perpendicular to X (ecliptic longitude 90°)
+ * - Z axis: points to ecliptic north pole (perpendicular to ecliptic plane)
+ * 
+ * The rotation axis is a unit vector pointing from planet center to its north pole.
+ * 
+ * @param northPoleRA North pole right ascension in degrees (J2000.0)
+ * @param northPoleDec North pole declination in degrees (J2000.0)
+ * @returns Unit vector pointing to north pole in scene coordinates
+ */
+export function calculateRotationAxis(northPoleRA: number, northPoleDec: number): { x: number; y: number; z: number } {
+  // Convert equatorial to ecliptic coordinates
+  const { lon, lat } = equatorialToEcliptic(northPoleRA, northPoleDec);
+  
+  // Convert ecliptic spherical (lon, lat) to Cartesian
+  // lon = ecliptic longitude (0° = vernal equinox, 90° = summer solstice direction)
+  // lat = ecliptic latitude (0° = ecliptic plane, 90° = ecliptic north pole)
+  const cosLat = Math.cos(lat);
+  const sinLat = Math.sin(lat);
+  const cosLon = Math.cos(lon);
+  const sinLon = Math.sin(lon);
+  
+  // Scene coordinates (ecliptic):
+  // X = cos(lat) * cos(lon)  -> points to vernal equinox when lon=0, lat=0
+  // Y = cos(lat) * sin(lon)  -> points to lon=90° direction
+  // Z = sin(lat)             -> points to ecliptic north pole when lat=90°
+  return {
+    x: cosLat * cosLon,
+    y: cosLat * sinLon,
+    z: sinLat
+  };
 }
 
 /**
@@ -47,7 +132,21 @@ export function rotationPeriodToSpeed(rotationPeriodHours: number): number {
 }
 
 /**
- * Celestial body configurations with rotation periods
+ * Celestial body configurations with rotation periods and axial tilt
+ * 
+ * Axial tilt data source: NASA Planetary Fact Sheets (J2000.0 epoch)
+ * https://nssdc.gsfc.nasa.gov/planetary/factsheet/
+ * 
+ * North pole coordinates are in ICRF/J2000.0 equatorial frame
+ * - northPoleRA: Right ascension of north pole (degrees)
+ * - northPoleDec: Declination of north pole (degrees)
+ * - axialTilt: Obliquity to orbit (degrees) - angle between rotation axis and orbit normal
+ * 
+ * Note on retrograde rotation:
+ * - Venus and Uranus have retrograde rotation (spin opposite to orbital motion)
+ * - Venus: axialTilt ~177° (nearly upside down)
+ * - Uranus: axialTilt ~97.77° (tilted on its side)
+ * - Negative rotationPeriod indicates retrograde rotation
  */
 export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
   sun: {
@@ -61,7 +160,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 0,
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 0,
-    rotationPeriod: 25.4 * 24,
+    rotationPeriod: 25.4 * 24, // ~25.4 days at equator
+    axialTilt: 7.25, // Tilt relative to ecliptic
+    northPoleRA: 286.13, // J2000.0
+    northPoleDec: 63.87, // J2000.0
     isSatellite: false
   },
   mercury: {
@@ -75,7 +177,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 29.1,
     meanAnomalyAtEpoch: 174.8,
     orbitalPeriod: 87.97,
-    rotationPeriod: 58.6 * 24,
+    rotationPeriod: 58.6 * 24, // 58.6 Earth days
+    axialTilt: 0.034, // Nearly no tilt
+    northPoleRA: 281.01, // J2000.0
+    northPoleDec: 61.45, // J2000.0
     isSatellite: false
   },
   venus: {
@@ -89,7 +194,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 54.9,
     meanAnomalyAtEpoch: 50.1,
     orbitalPeriod: 224.7,
-    rotationPeriod: -243 * 24,
+    rotationPeriod: -243 * 24, // Retrograde rotation, 243 Earth days
+    axialTilt: 177.36, // Nearly upside down (retrograde)
+    northPoleRA: 272.76, // J2000.0
+    northPoleDec: 67.16, // J2000.0
     isSatellite: false
   },
   earth: {
@@ -103,7 +211,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 102.9,
     meanAnomalyAtEpoch: 100.5,
     orbitalPeriod: 365.25,
-    rotationPeriod: 24,
+    rotationPeriod: 24, // 24 hours (sidereal: 23.9345)
+    axialTilt: 23.44, // Earth's famous obliquity
+    northPoleRA: 0.0, // By definition (ICRF aligned with Earth's equator at J2000.0)
+    northPoleDec: 90.0, // North celestial pole
     isSatellite: false
   },
   mars: {
@@ -117,7 +228,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 286.5,
     meanAnomalyAtEpoch: 19.4,
     orbitalPeriod: 686.98,
-    rotationPeriod: 24.6,
+    rotationPeriod: 24.6, // 24.6 hours
+    axialTilt: 25.19, // Similar to Earth
+    northPoleRA: 317.68, // J2000.0
+    northPoleDec: 52.89, // J2000.0
     isSatellite: false
   },
   jupiter: {
@@ -131,7 +245,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 273.9,
     meanAnomalyAtEpoch: 20.0,
     orbitalPeriod: 4332.59,
-    rotationPeriod: 9.9,
+    rotationPeriod: 9.93, // 9.93 hours (fastest rotating planet)
+    axialTilt: 3.13, // Small tilt
+    northPoleRA: 268.06, // J2000.0
+    northPoleDec: 64.50, // J2000.0
     isSatellite: false
   },
   saturn: {
@@ -145,7 +262,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 339.4,
     meanAnomalyAtEpoch: 317.0,
     orbitalPeriod: 10759.22,
-    rotationPeriod: 10.7,
+    rotationPeriod: 10.7, // 10.7 hours
+    axialTilt: 26.73, // Similar to Earth
+    northPoleRA: 40.59, // J2000.0
+    northPoleDec: 83.54, // J2000.0
     isSatellite: false
   },
   uranus: {
@@ -159,7 +279,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 96.7,
     meanAnomalyAtEpoch: 142.2,
     orbitalPeriod: 30688.5,
-    rotationPeriod: -17.2,
+    rotationPeriod: -17.2, // Retrograde rotation, 17.2 hours
+    axialTilt: 97.77, // Tilted on its side!
+    northPoleRA: 257.31, // J2000.0
+    northPoleDec: -15.18, // J2000.0 (negative declination)
     isSatellite: false
   },
   neptune: {
@@ -173,7 +296,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 276.3,
     meanAnomalyAtEpoch: 256.2,
     orbitalPeriod: 60182,
-    rotationPeriod: 16.1,
+    rotationPeriod: 16.1, // 16.1 hours
+    axialTilt: 28.32, // Similar to Earth
+    northPoleRA: 299.33, // J2000.0 (updated from 299.40)
+    northPoleDec: 42.95, // J2000.0
     isSatellite: false
   },
   
@@ -189,7 +315,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 0,
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 27.32,
-    rotationPeriod: 27.32 * 24,
+    rotationPeriod: 27.32 * 24, // Tidally locked
+    axialTilt: 6.68, // Relative to ecliptic
+    northPoleRA: 270.0, // Approximate
+    northPoleDec: 66.54, // J2000.0
     isSatellite: true,
     parentBody: 'earth'
   },
@@ -206,7 +335,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 0,
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 1.77,
-    rotationPeriod: 1.77 * 24,
+    rotationPeriod: 1.77 * 24, // Tidally locked
+    axialTilt: 0.0, // Tidally locked, aligned with Jupiter's equator
+    northPoleRA: 268.05,
+    northPoleDec: 64.50,
     isSatellite: true,
     parentBody: 'jupiter'
   },
@@ -221,7 +353,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 0,
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 3.55,
-    rotationPeriod: 3.55 * 24,
+    rotationPeriod: 3.55 * 24, // Tidally locked
+    axialTilt: 0.1,
+    northPoleRA: 268.08,
+    northPoleDec: 64.51,
     isSatellite: true,
     parentBody: 'jupiter'
   },
@@ -236,7 +371,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 0,
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 7.15,
-    rotationPeriod: 7.15 * 24,
+    rotationPeriod: 7.15 * 24, // Tidally locked
+    axialTilt: 0.2,
+    northPoleRA: 268.20,
+    northPoleDec: 64.57,
     isSatellite: true,
     parentBody: 'jupiter'
   },
@@ -251,7 +389,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 0,
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 16.69,
-    rotationPeriod: 16.69 * 24,
+    rotationPeriod: 16.69 * 24, // Tidally locked
+    axialTilt: 0.0,
+    northPoleRA: 268.72,
+    northPoleDec: 64.83,
     isSatellite: true,
     parentBody: 'jupiter'
   },
@@ -268,7 +409,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 0,
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 15.95,
-    rotationPeriod: 15.95 * 24,
+    rotationPeriod: 15.95 * 24, // Tidally locked
+    axialTilt: 0.3, // Small tilt relative to Saturn's equator
+    northPoleRA: 39.48,
+    northPoleDec: 83.43,
     isSatellite: true,
     parentBody: 'saturn'
   },
@@ -283,7 +427,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 0,
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 1.37,
-    rotationPeriod: 1.37 * 24,
+    rotationPeriod: 1.37 * 24, // Tidally locked
+    axialTilt: 0.0,
+    northPoleRA: 40.66,
+    northPoleDec: 83.52,
     isSatellite: true,
     parentBody: 'saturn'
   },
@@ -300,7 +447,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 0,
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 1.41,
-    rotationPeriod: 1.41 * 24,
+    rotationPeriod: 1.41 * 24, // Tidally locked
+    axialTilt: 0.0, // Aligned with Uranus's equator
+    northPoleRA: 257.43,
+    northPoleDec: -15.08,
     isSatellite: true,
     parentBody: 'uranus'
   },
@@ -315,7 +465,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 0,
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 2.52,
-    rotationPeriod: 2.52 * 24,
+    rotationPeriod: 2.52 * 24, // Tidally locked
+    axialTilt: 0.0,
+    northPoleRA: 257.43,
+    northPoleDec: -15.10,
     isSatellite: true,
     parentBody: 'uranus'
   },
@@ -330,7 +483,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 0,
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 4.14,
-    rotationPeriod: 4.14 * 24,
+    rotationPeriod: 4.14 * 24, // Tidally locked
+    axialTilt: 0.0,
+    northPoleRA: 257.43,
+    northPoleDec: -15.10,
     isSatellite: true,
     parentBody: 'uranus'
   },
@@ -345,7 +501,10 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 0,
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 8.71,
-    rotationPeriod: 8.71 * 24,
+    rotationPeriod: 8.71 * 24, // Tidally locked
+    axialTilt: 0.0,
+    northPoleRA: 257.43,
+    northPoleDec: -15.10,
     isSatellite: true,
     parentBody: 'uranus'
   }

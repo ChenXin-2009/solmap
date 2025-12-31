@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ORBIT_RENDER_CONFIG, SATELLITE_ORBIT_STYLE_CONFIG, SATELLITE_ORBIT_FADE_CONFIG } from '@/lib/config/visualConfig';
+import { calculateRotationAxis, CELESTIAL_BODIES } from '@/lib/types/celestialTypes';
 
 /**
  * 卫星轨道渲染类（支持母行星轴倾角的动态轨道平面）
@@ -236,17 +237,58 @@ export class SatelliteOrbit {
   }
 
   /**
-   * 设置正确的轨道朝向（已禁用 - 使用默认朝向）
+   * 设置正确的轨道朝向
+   * 
+   * 卫星轨道平面相对于母行星的赤道面，而不是黄道面。
+   * 当母行星有轴倾角时，卫星轨道平面必须跟随母行星的朝向变化。
+   * 
+   * 场景坐标系（黄道坐标系）：
+   * - X 轴：指向春分点
+   * - Y 轴：在黄道平面内，与 X 垂直
+   * - Z 轴：指向黄道北极
+   * 
+   * 实现原理：
+   * 1. 获取母行星的自转轴方向（北极方向）
+   * 2. 计算从黄道北极 (0,0,1) 到母行星北极的旋转
+   * 3. 将此旋转应用到卫星轨道组
    */
   private setCorrectOrientation(): void {
     if (this.isOrientationSet || !this.parentBodyName) return;
     
     if (this.eclipticOrbit) {
+      // 如果轨道相对于黄道面，不需要额外旋转
       this.isOrientationSet = true;
       return;
     }
     
-    // 轴倾角功能已禁用，使用默认朝向
+    // 获取母行星数据
+    const parentBody = CELESTIAL_BODIES[this.parentBodyName.toLowerCase()];
+    if (!parentBody || parentBody.northPoleRA === undefined || parentBody.northPoleDec === undefined) {
+      // 没有母行星数据，使用默认朝向
+      this.isOrientationSet = true;
+      return;
+    }
+    
+    // 计算母行星的自转轴方向
+    const axis = calculateRotationAxis(parentBody.northPoleRA, parentBody.northPoleDec);
+    const parentAxis = new THREE.Vector3(axis.x, axis.y, axis.z).normalize();
+    
+    // 默认轴是 Z-up（黄道北极）
+    const defaultAxis = new THREE.Vector3(0, 0, 1);
+    
+    // 如果母行星轴与默认轴几乎相同，不需要旋转
+    if (parentAxis.distanceTo(defaultAxis) < 0.001) {
+      this.isOrientationSet = true;
+      return;
+    }
+    
+    // 计算从默认轴到母行星轴的旋转四元数
+    const quaternion = new THREE.Quaternion();
+    quaternion.setFromUnitVectors(defaultAxis, parentAxis);
+    
+    // 应用旋转到轨道组
+    this.root.quaternion.copy(quaternion);
+    
     this.isOrientationSet = true;
   }
 

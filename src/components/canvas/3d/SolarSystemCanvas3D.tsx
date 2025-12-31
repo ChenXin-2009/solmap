@@ -465,7 +465,36 @@ export default function SolarSystemCanvas3D() {
           }
         });
 
+        // 播放时的相机跟踪逻辑：同时更新相机和目标点位置，保持相对偏移
+        // 这样在播放时，行星始终保持在屏幕中心，且视角不会被锁定
+        // 注意：必须在计算轨道透明度之前更新相机位置，否则快速转动时轨道隐藏会失效
+        if (state.isPlaying && state.selectedPlanet) {
+          const selectedBody = currentBodies.find((b: any) => b.name === state.selectedPlanet);
+          if (selectedBody && cameraControllerRef.current) {
+            const controls = cameraControllerRef.current.getControls();
+            const targetPos = new THREE.Vector3(selectedBody.x, selectedBody.y, selectedBody.z);
+            
+            // 计算相机相对于当前目标的偏移向量（保持距离和方向）
+            const cameraOffset = new THREE.Vector3()
+              .subVectors(camera.position, controls.target);
+            
+            // 同时更新目标和相机位置，保持相对关系
+            controls.target.copy(targetPos);
+            camera.position.copy(targetPos).add(cameraOffset);
+            controls.update();
+          }
+        }
+        
+        // 播放时降低阻尼因子获得更敏锐的相机响应，非播放时恢复正常值
+        if (cameraControllerRef.current) {
+          const controls = cameraControllerRef.current.getControls();
+          // 播放时使用较低的阻尼（0.02）以获得敏捷的跟踪，保持缓动但响应更快
+          // 非播放时使用正常阻尼（0.04）以保留平滑的交互感
+          controls.dampingFactor = state.isPlaying ? 0.02 : 0.04;
+        }
+
         // 计算相机到最近行星的距离，用于所有轨道的渐隐
+        // 注意：此计算必须在相机跟踪逻辑之后，确保使用更新后的相机位置
         let minDistanceToAnyPlanet = Infinity;
         currentBodies.forEach((body: any) => {
           if (body.isSun) return;
@@ -500,33 +529,6 @@ export default function SolarSystemCanvas3D() {
             orbit.setOpacity(discOpacity, lineOpacity);
           }
         });
-        
-        // 播放时的相机跟踪逻辑：同时更新相机和目标点位置，保持相对偏移
-        // 这样在播放时，行星始终保持在屏幕中心，且视角不会被锁定
-        if (state.isPlaying && state.selectedPlanet) {
-          const selectedBody = currentBodies.find((b: any) => b.name === state.selectedPlanet);
-          if (selectedBody && cameraControllerRef.current) {
-            const controls = cameraControllerRef.current.getControls();
-            const targetPos = new THREE.Vector3(selectedBody.x, selectedBody.y, selectedBody.z);
-            
-            // 计算相机相对于当前目标的偏移向量（保持距离和方向）
-            const cameraOffset = new THREE.Vector3()
-              .subVectors(camera.position, controls.target);
-            
-            // 同时更新目标和相机位置，保持相对关系
-            controls.target.copy(targetPos);
-            camera.position.copy(targetPos).add(cameraOffset);
-            controls.update();
-          }
-        }
-        
-        // 播放时降低阻尼因子获得更敏锐的相机响应，非播放时恢复正常值
-        if (cameraControllerRef.current) {
-          const controls = cameraControllerRef.current.getControls();
-          // 播放时使用较低的阻尼（0.02）以获得敏捷的跟踪，保持缓动但响应更快
-          // 非播放时使用正常阻尼（0.04）以保留平滑的交互感
-          controls.dampingFactor = state.isPlaying ? 0.02 : 0.04;
-        }
 
         // 更新太阳位置
         const sunPlanet = planetsRef.current.get('sun');
