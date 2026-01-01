@@ -21,6 +21,7 @@ export interface CelestialBodyConfig {
   
   // Rotation parameters
   rotationPeriod: number; // Rotation period in hours (negative for retrograde)
+  primeMeridianAtJ2000: number; // Prime meridian longitude at J2000.0 epoch in degrees (W longitude)
   
   // Axial tilt parameters (J2000.0 epoch)
   // Reference: NASA Planetary Fact Sheets
@@ -137,10 +138,14 @@ export function rotationPeriodToSpeed(rotationPeriodHours: number): number {
  * Axial tilt data source: NASA Planetary Fact Sheets (J2000.0 epoch)
  * https://nssdc.gsfc.nasa.gov/planetary/factsheet/
  * 
+ * Prime meridian (W0) data source: IAU Working Group on Cartographic Coordinates
+ * https://astrogeology.usgs.gov/search/map/Docs/WGCCRE/WGCCRE2015reprint
+ * 
  * North pole coordinates are in ICRF/J2000.0 equatorial frame
  * - northPoleRA: Right ascension of north pole (degrees)
  * - northPoleDec: Declination of north pole (degrees)
  * - axialTilt: Obliquity to orbit (degrees) - angle between rotation axis and orbit normal
+ * - primeMeridianAtJ2000: Prime meridian longitude at J2000.0 (degrees) - W0 in IAU notation
  * 
  * Note on retrograde rotation:
  * - Venus and Uranus have retrograde rotation (spin opposite to orbital motion)
@@ -161,6 +166,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 0,
     rotationPeriod: 25.4 * 24, // ~25.4 days at equator
+    primeMeridianAtJ2000: 84.176, // IAU 2015
     axialTilt: 7.25, // Tilt relative to ecliptic
     northPoleRA: 286.13, // J2000.0
     northPoleDec: 63.87, // J2000.0
@@ -178,6 +184,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 174.8,
     orbitalPeriod: 87.97,
     rotationPeriod: 58.6 * 24, // 58.6 Earth days
+    primeMeridianAtJ2000: 329.5469, // IAU 2015
     axialTilt: 0.034, // Nearly no tilt
     northPoleRA: 281.01, // J2000.0
     northPoleDec: 61.45, // J2000.0
@@ -195,6 +202,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 50.1,
     orbitalPeriod: 224.7,
     rotationPeriod: -243 * 24, // Retrograde rotation, 243 Earth days
+    primeMeridianAtJ2000: 160.20, // IAU 2015
     axialTilt: 177.36, // Nearly upside down (retrograde)
     northPoleRA: 272.76, // J2000.0
     northPoleDec: 67.16, // J2000.0
@@ -211,7 +219,8 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 102.9,
     meanAnomalyAtEpoch: 100.5,
     orbitalPeriod: 365.25,
-    rotationPeriod: 24, // 24 hours (sidereal: 23.9345)
+    rotationPeriod: 23.9345, // Sidereal day in hours (not solar day of 24h)
+    primeMeridianAtJ2000: 190.147, // GMST at J2000.0 converted to prime meridian angle
     axialTilt: 23.44, // Earth's famous obliquity
     northPoleRA: 0.0, // By definition (ICRF aligned with Earth's equator at J2000.0)
     northPoleDec: 90.0, // North celestial pole
@@ -228,7 +237,8 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 286.5,
     meanAnomalyAtEpoch: 19.4,
     orbitalPeriod: 686.98,
-    rotationPeriod: 24.6, // 24.6 hours
+    rotationPeriod: 24.6229, // Mars sidereal day in hours
+    primeMeridianAtJ2000: 176.630, // IAU 2015
     axialTilt: 25.19, // Similar to Earth
     northPoleRA: 317.68, // J2000.0
     northPoleDec: 52.89, // J2000.0
@@ -245,7 +255,8 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 273.9,
     meanAnomalyAtEpoch: 20.0,
     orbitalPeriod: 4332.59,
-    rotationPeriod: 9.93, // 9.93 hours (fastest rotating planet)
+    rotationPeriod: 9.9250, // System III rotation period in hours
+    primeMeridianAtJ2000: 284.95, // IAU 2015 (System III)
     axialTilt: 3.13, // Small tilt
     northPoleRA: 268.06, // J2000.0
     northPoleDec: 64.50, // J2000.0
@@ -262,7 +273,8 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 339.4,
     meanAnomalyAtEpoch: 317.0,
     orbitalPeriod: 10759.22,
-    rotationPeriod: 10.7, // 10.7 hours
+    rotationPeriod: 10.656, // System III rotation period in hours
+    primeMeridianAtJ2000: 38.90, // IAU 2015 (System III)
     axialTilt: 26.73, // Similar to Earth
     northPoleRA: 40.59, // J2000.0
     northPoleDec: 83.54, // J2000.0
@@ -279,7 +291,8 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 96.7,
     meanAnomalyAtEpoch: 142.2,
     orbitalPeriod: 30688.5,
-    rotationPeriod: -17.2, // Retrograde rotation, 17.2 hours
+    rotationPeriod: -17.24, // Retrograde rotation, 17.24 hours
+    primeMeridianAtJ2000: 203.81, // IAU 2015
     axialTilt: 97.77, // Tilted on its side!
     northPoleRA: 257.31, // J2000.0
     northPoleDec: -15.18, // J2000.0 (negative declination)
@@ -296,7 +309,8 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     argumentOfPeriapsis: 276.3,
     meanAnomalyAtEpoch: 256.2,
     orbitalPeriod: 60182,
-    rotationPeriod: 16.1, // 16.1 hours
+    rotationPeriod: 16.11, // 16.11 hours
+    primeMeridianAtJ2000: 253.18, // IAU 2015
     axialTilt: 28.32, // Similar to Earth
     northPoleRA: 299.33, // J2000.0 (updated from 299.40)
     northPoleDec: 42.95, // J2000.0
@@ -316,6 +330,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 27.32,
     rotationPeriod: 27.32 * 24, // Tidally locked
+    primeMeridianAtJ2000: 38.3213, // IAU 2015
     axialTilt: 6.68, // Relative to ecliptic
     northPoleRA: 270.0, // Approximate
     northPoleDec: 66.54, // J2000.0
@@ -336,6 +351,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 1.77,
     rotationPeriod: 1.77 * 24, // Tidally locked
+    primeMeridianAtJ2000: 200.39, // IAU 2015
     axialTilt: 0.0, // Tidally locked, aligned with Jupiter's equator
     northPoleRA: 268.05,
     northPoleDec: 64.50,
@@ -354,6 +370,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 3.55,
     rotationPeriod: 3.55 * 24, // Tidally locked
+    primeMeridianAtJ2000: 36.022, // IAU 2015
     axialTilt: 0.1,
     northPoleRA: 268.08,
     northPoleDec: 64.51,
@@ -372,6 +389,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 7.15,
     rotationPeriod: 7.15 * 24, // Tidally locked
+    primeMeridianAtJ2000: 44.064, // IAU 2015
     axialTilt: 0.2,
     northPoleRA: 268.20,
     northPoleDec: 64.57,
@@ -390,6 +408,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 16.69,
     rotationPeriod: 16.69 * 24, // Tidally locked
+    primeMeridianAtJ2000: 259.51, // IAU 2015
     axialTilt: 0.0,
     northPoleRA: 268.72,
     northPoleDec: 64.83,
@@ -410,6 +429,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 15.95,
     rotationPeriod: 15.95 * 24, // Tidally locked
+    primeMeridianAtJ2000: 186.5855, // IAU 2015
     axialTilt: 0.3, // Small tilt relative to Saturn's equator
     northPoleRA: 39.48,
     northPoleDec: 83.43,
@@ -428,6 +448,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 1.37,
     rotationPeriod: 1.37 * 24, // Tidally locked
+    primeMeridianAtJ2000: 6.32, // IAU 2015
     axialTilt: 0.0,
     northPoleRA: 40.66,
     northPoleDec: 83.52,
@@ -448,6 +469,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 1.41,
     rotationPeriod: 1.41 * 24, // Tidally locked
+    primeMeridianAtJ2000: 30.70, // IAU 2015
     axialTilt: 0.0, // Aligned with Uranus's equator
     northPoleRA: 257.43,
     northPoleDec: -15.08,
@@ -466,6 +488,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 2.52,
     rotationPeriod: 2.52 * 24, // Tidally locked
+    primeMeridianAtJ2000: 156.22, // IAU 2015
     axialTilt: 0.0,
     northPoleRA: 257.43,
     northPoleDec: -15.10,
@@ -484,6 +507,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 4.14,
     rotationPeriod: 4.14 * 24, // Tidally locked
+    primeMeridianAtJ2000: 108.05, // IAU 2015
     axialTilt: 0.0,
     northPoleRA: 257.43,
     northPoleDec: -15.10,
@@ -502,6 +526,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 0,
     orbitalPeriod: 8.71,
     rotationPeriod: 8.71 * 24, // Tidally locked
+    primeMeridianAtJ2000: 77.74, // IAU 2015
     axialTilt: 0.0,
     northPoleRA: 257.43,
     northPoleDec: -15.10,

@@ -69,6 +69,7 @@ export class Planet {
   private rotationAxis: THREE.Vector3; // Unit vector pointing to north pole in ecliptic coordinates
   private axialTilt: number = 0; // Obliquity in degrees
   private axialTiltApplied: boolean = false; // Whether axial tilt has been applied to mesh
+  private primeMeridianAtJ2000: number = 0; // Prime meridian longitude at J2000.0 in degrees
 
   
   // Texture support (Render Layer only - does not affect physics)
@@ -145,10 +146,13 @@ export class Planet {
       const axis = calculateRotationAxis(bodyData.northPoleRA, bodyData.northPoleDec);
       this.rotationAxis = new THREE.Vector3(axis.x, axis.y, axis.z).normalize();
       this.axialTilt = bodyData.axialTilt || 0;
+      // Get prime meridian at J2000.0 for initial rotation phase
+      this.primeMeridianAtJ2000 = bodyData.primeMeridianAtJ2000 || 0;
     } else if (celestialConfig?.northPoleRA !== undefined && celestialConfig?.northPoleDec !== undefined) {
       const axis = calculateRotationAxis(celestialConfig.northPoleRA, celestialConfig.northPoleDec);
       this.rotationAxis = new THREE.Vector3(axis.x, axis.y, axis.z).normalize();
       this.axialTilt = celestialConfig.axialTilt || 0;
+      this.primeMeridianAtJ2000 = celestialConfig.primeMeridianAtJ2000 || 0;
     }
     
     // 使用真实半径创建行星
@@ -897,6 +901,13 @@ export class Planet {
    * 
    * 使用绝对时间计算旋转角度，确保暂停后恢复时位置正确。
    * 
+   * 自转角度计算公式（基于 IAU 行星旋转参数）：
+   * W = W0 + W_dot * d
+   * 其中：
+   * - W0 是 J2000.0 时刻的本初子午线经度（primeMeridianAtJ2000）
+   * - W_dot 是自转角速度（度/天）
+   * - d 是从 J2000.0 起的天数
+   * 
    * @param currentTimeInDays 当前时间（从 J2000.0 起的天数）
    * @param timeSpeed 时间速度倍数（未使用，保留接口兼容性）
    * @param isPlaying 是否正在播放（可选，默认 true）
@@ -905,13 +916,17 @@ export class Planet {
     if (this.rotationSpeed === 0) return;
     
     // 计算基于绝对时间的旋转角度
-    // rotationSpeed 是弧度/秒
-    // currentTimeInDays 是从 J2000.0 起的天数
-    // 转换为秒：days * 24 * 3600
-    const timeInSeconds = currentTimeInDays * 24 * 3600;
+    // rotationSpeed 是弧度/秒，需要转换为度/天
+    // 1 天 = 86400 秒
+    // rotationSpeed (rad/s) * 86400 (s/day) * (180/π) (deg/rad) = 度/天
+    const rotationRateDegreesPerDay = this.rotationSpeed * 86400 * (180 / Math.PI);
     
-    // 计算总旋转角度（弧度）
-    const totalRotation = this.rotationSpeed * timeInSeconds;
+    // 计算当前子午线经度（度）
+    // W = W0 + W_dot * d
+    const currentMeridianDegrees = this.primeMeridianAtJ2000 + rotationRateDegreesPerDay * currentTimeInDays;
+    
+    // 转换为弧度
+    const totalRotation = currentMeridianDegrees * (Math.PI / 180);
     
     // 获取当前的轴倾角四元数（applyAxialTilt 设置的）
     // 我们需要在此基础上添加自转
