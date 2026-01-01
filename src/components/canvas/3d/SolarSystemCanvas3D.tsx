@@ -36,7 +36,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRe
 import ScaleRuler from './ScaleRuler';
 import DistanceDisplay from './DistanceDisplay';
 import SettingsMenu from '@/components/SettingsMenu';
-import { ORBIT_COLORS, SUN_LIGHT_CONFIG, ORBIT_CURVE_POINTS, SATELLITE_CONFIG, ORBIT_FADE_CONFIG } from '@/lib/config/visualConfig';
+import { ORBIT_COLORS, SUN_LIGHT_CONFIG, ORBIT_CURVE_POINTS, SATELLITE_CONFIG, ORBIT_FADE_CONFIG, FAR_VIEW_CONFIG } from '@/lib/config/visualConfig';
 import { TextureManager } from '@/lib/3d/TextureManager';
 
 // ==================== 可调参数配置 ====================
@@ -526,12 +526,81 @@ export default function SolarSystemCanvas3D() {
           lineOpacity = lineMin + t * (1.0 - lineMin);
         }
 
+        // ==================== 远距离视图逻辑 ====================
+        // 计算相机到太阳系中心（太阳）的距离
+        const distanceToSun = camera.position.length();
+        
+        // 计算远距离时的行星、轨道、标签透明度
+        let farViewPlanetOpacity = 1.0;
+        let farViewOrbitOpacity = 1.0;
+        let farViewLabelOpacity = 1.0;
+        
+        if (FAR_VIEW_CONFIG.enabled) {
+          // 行星淡出
+          if (distanceToSun >= FAR_VIEW_CONFIG.planetFadeEndDistance) {
+            farViewPlanetOpacity = 0;
+          } else if (distanceToSun > FAR_VIEW_CONFIG.planetFadeStartDistance) {
+            const range = FAR_VIEW_CONFIG.planetFadeEndDistance - FAR_VIEW_CONFIG.planetFadeStartDistance;
+            farViewPlanetOpacity = 1 - (distanceToSun - FAR_VIEW_CONFIG.planetFadeStartDistance) / range;
+          }
+          
+          // 轨道淡出
+          if (distanceToSun >= FAR_VIEW_CONFIG.orbitFadeEndDistance) {
+            farViewOrbitOpacity = 0;
+          } else if (distanceToSun > FAR_VIEW_CONFIG.orbitFadeStartDistance) {
+            const range = FAR_VIEW_CONFIG.orbitFadeEndDistance - FAR_VIEW_CONFIG.orbitFadeStartDistance;
+            farViewOrbitOpacity = 1 - (distanceToSun - FAR_VIEW_CONFIG.orbitFadeStartDistance) / range;
+          }
+          
+          // 标签淡出
+          if (distanceToSun >= FAR_VIEW_CONFIG.labelFadeEndDistance) {
+            farViewLabelOpacity = 0;
+          } else if (distanceToSun > FAR_VIEW_CONFIG.labelFadeStartDistance) {
+            const range = FAR_VIEW_CONFIG.labelFadeEndDistance - FAR_VIEW_CONFIG.labelFadeStartDistance;
+            farViewLabelOpacity = 1 - (distanceToSun - FAR_VIEW_CONFIG.labelFadeStartDistance) / range;
+          }
+        }
+        
+        // 合并远距离透明度到轨道透明度
+        discOpacity *= farViewOrbitOpacity;
+        lineOpacity *= farViewOrbitOpacity;
+
         // 应用透明度到所有行星轨道
         orbitsRef.current.forEach((orbit) => {
           if (orbit && orbit.setOpacity) {
             orbit.setOpacity(discOpacity, lineOpacity);
           }
         });
+        
+        // 应用远距离行星透明度
+        if (FAR_VIEW_CONFIG.enabled && farViewPlanetOpacity < 1) {
+          currentBodies.forEach((body: any) => {
+            if (body.isSun) return; // 太阳不隐藏
+            const key = body.name.toLowerCase();
+            const planet = planetsRef.current.get(key);
+            if (planet) {
+              const mesh = planet.getMesh();
+              // 设置行星网格的可见性
+              mesh.visible = farViewPlanetOpacity > 0.01;
+              // 如果材质支持透明度，也可以设置
+              if (mesh.material && 'opacity' in mesh.material) {
+                (mesh.material as any).opacity = farViewPlanetOpacity;
+                (mesh.material as any).transparent = farViewPlanetOpacity < 1;
+              }
+            }
+          });
+        } else {
+          // 恢复行星可见性
+          currentBodies.forEach((body: any) => {
+            if (body.isSun) return;
+            const key = body.name.toLowerCase();
+            const planet = planetsRef.current.get(key);
+            if (planet) {
+              const mesh = planet.getMesh();
+              mesh.visible = true;
+            }
+          });
+        }
 
         // 更新太阳位置
         const sunPlanet = planetsRef.current.get('sun');

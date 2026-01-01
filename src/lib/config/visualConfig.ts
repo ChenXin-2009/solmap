@@ -93,6 +93,80 @@ export const SUN_GLOW_CONFIG = {
   radiusMultiplier: 1.5,
   color: 0xFFF4EA,
   opacity: 0.6,
+  
+  // ==================== 远距离增强配置 ====================
+  
+  /** 远距离时光晕增强开始距离（AU） */
+  farEnhanceStartDistance: 50,
+  
+  /** 远距离时光晕增强结束距离（AU）- 达到最大增强 */
+  farEnhanceEndDistance: 200,
+  
+  /** 远距离时光晕大小倍数（相对于正常大小） */
+  farEnhanceSizeMultiplier: 3.0,
+  
+  /** 远距离时光晕不透明度倍数 */
+  farEnhanceOpacityMultiplier: 1.5,
+};
+
+/**
+ * 太阳四芒星（Star Spikes）配置
+ * 模拟望远镜/相机镜头产生的衍射尖峰效果
+ * 在远距离时显示，让太阳看起来像真正的恒星
+ */
+export const SUN_STAR_SPIKES_CONFIG = {
+  /** 是否启用四芒星效果 */
+  enabled: true,
+  
+  /** 四芒星开始显示的距离（AU） */
+  showStartDistance: 30,
+  
+  /** 四芒星完全显示的距离（AU） */
+  showFullDistance: 80,
+  
+  /** 尖峰数量（4 = 四芒星，6 = 六芒星） */
+  spikeCount: 4,
+  
+  /** 尖峰旋转角度（度）- 45度使其呈X形 */
+  rotationAngle: 45,
+  
+  /** 尖峰长度倍数（相对于光晕大小） */
+  lengthMultiplier: 2,
+  
+  /** 尖峰宽度（像素） */
+  spikeWidth: 8,
+  
+  /** 尖峰颜色 */
+  color: '#FFFAF0',
+  
+  /** 尖峰基础不透明度 */
+  opacity: 0.6,
+  
+  /** 尖峰渐变衰减指数（值越大，尖峰越尖锐） */
+  falloffExponent: 0.5,
+  
+  // ==================== 月牙光晕配置 ====================
+  
+  /** 是否启用月牙光晕 */
+  crescentEnabled: true,
+  
+  /** 大圆半径（相对于画布大小，0-0.5） */
+  crescentOuterRadius: 0.26,
+  
+  /** 小圆半径（相对于大圆半径，接近1表示小圆几乎和大圆一样大） */
+  crescentInnerRadiusRatio: 0.75,
+  
+  /** 小圆圆心偏移（相对于大圆半径，正值向右偏移，形成左侧月牙） */
+  crescentOffsetRatio: 0.15,
+  
+  /** 月牙光芒颜色 */
+  crescentColor: '#FFF8E8',
+  
+  /** 月牙光芒不透明度 */
+  crescentOpacity: 0.6,
+  
+  /** 月牙光芒渐变衰减指数（类似四芒星） */
+  crescentFalloff: 1.5,
 };
 
 /**
@@ -109,6 +183,33 @@ export const SUN_RAINBOW_LAYERS = [
   { color: '#ffd56b', radiusMultiplier: 2.3, opacity: 0.25 },
   { color: '#6bd6ff', radiusMultiplier: 2.8, opacity: 0.2 },
 ];
+
+/**
+ * 远距离视图配置
+ * 当相机距离太阳系中心足够远时，隐藏行星以优化性能
+ */
+export const FAR_VIEW_CONFIG = {
+  /** 是否启用远距离行星隐藏 */
+  enabled: true,
+  
+  /** 行星开始淡出的距离（AU）- 设置较大值，主要用于性能优化 */
+  planetFadeStartDistance: 80,
+  
+  /** 行星完全隐藏的距离（AU） */
+  planetFadeEndDistance: 300,
+  
+  /** 轨道开始淡出的距离（AU） */
+  orbitFadeStartDistance: 800,
+  
+  /** 轨道完全隐藏的距离（AU） */
+  orbitFadeEndDistance: 2000,
+  
+  /** 标签开始淡出的距离（AU）- 太阳标签除外 */
+  labelFadeStartDistance: 500,
+  
+  /** 标签完全隐藏的距离（AU） */
+  labelFadeEndDistance: 1000,
+};
 
 /**
  * 轨道渐变（Orbit Gradient）配置

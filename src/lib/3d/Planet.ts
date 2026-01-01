@@ -18,7 +18,7 @@
 import * as THREE from 'three';
 import type { CelestialBody } from '@/lib/astronomy/orbit';
 import { CelestialBodyConfig, rotationPeriodToSpeed, calculateRotationAxis, CELESTIAL_BODIES } from '@/lib/types/celestialTypes';
-import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS, PLANET_LOD_CONFIG, PLANET_GRID_CONFIG, PLANET_LIGHTING_CONFIG, getCelestialMaterialParams, SATURN_RING_CONFIG } from '@/lib/config/visualConfig';
+import { MARKER_CONFIG, SUN_GLOW_CONFIG, SUN_RAINBOW_LAYERS, SUN_STAR_SPIKES_CONFIG, PLANET_LOD_CONFIG, PLANET_GRID_CONFIG, PLANET_LIGHTING_CONFIG, getCelestialMaterialParams, SATURN_RING_CONFIG } from '@/lib/config/visualConfig';
 
 // 真实行星半径（AU单位）
 // 1 AU = 149,597,870 km
@@ -60,6 +60,7 @@ export class Planet {
   private targetOpacity: number = 0; // 目标透明度
   private glowMesh: THREE.Mesh | null = null; // 太阳光晕网格
   private rainbowSprites: THREE.Sprite[] = [];
+  private starSpikesSprite: THREE.Sprite | null = null; // 四芒星效果
   private gridGroup: THREE.Group | null = null; // 经纬线组
   private isSun: boolean = false; // 是否为太阳
   private currentSegments: number = 32; // 当前分段数（用于平滑过渡）
@@ -743,6 +744,155 @@ export class Planet {
       this.mesh.add(spr);
       this.rainbowSprites.push(spr);
     }
+    
+    // 创建四芒星效果（远距离时显示）
+    if (SUN_STAR_SPIKES_CONFIG.enabled) {
+      this.createStarSpikes();
+    }
+  }
+  
+  /**
+   * 创建四芒星效果（衍射尖峰）
+   * 使用 Canvas 绘制带渐变的十字形尖峰
+   */
+  private createStarSpikes(): void {
+    const cfg = SUN_STAR_SPIKES_CONFIG;
+    const size = 1024; // 较大的画布以获得更好的质量
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    
+    const center = size / 2;
+    const spikeLength = size / 2 * 0.92; // 尖峰长度
+    const spikeWidth = cfg.spikeWidth * 3; // 尖峰基础宽度
+    const rotationRad = (cfg.rotationAngle * Math.PI) / 180;
+    
+    // 清除画布（透明背景）
+    ctx.clearRect(0, 0, size, size);
+    
+    // ==================== 绘制月牙光芒（大圆减小圆，带渐变光芒效果） ====================
+    if (cfg.crescentEnabled) {
+      const outerRadius = size * cfg.crescentOuterRadius;
+      const innerRadius = outerRadius * cfg.crescentInnerRadiusRatio;
+      const offsetX = outerRadius * cfg.crescentOffsetRatio; // 小圆向右偏移，形成左侧月牙
+      
+      // 使用离屏 canvas 绘制月牙形状
+      const crescentCanvas = document.createElement('canvas');
+      crescentCanvas.width = size;
+      crescentCanvas.height = size;
+      const crescentCtx = crescentCanvas.getContext('2d')!;
+      
+      // 绘制大圆（带从中心向外的渐变光芒效果）
+      const segments = 30; // 分段绘制以实现渐变效果
+      for (let i = segments - 1; i >= 0; i--) {
+        const t = i / segments;
+        const r = outerRadius * (0.3 + t * 0.7); // 从30%到100%半径
+        const alpha = Math.pow(1 - t, cfg.crescentFalloff) * cfg.crescentOpacity;
+        
+        crescentCtx.beginPath();
+        crescentCtx.arc(center, center, r, 0, Math.PI * 2);
+        crescentCtx.fillStyle = `${cfg.crescentColor}${Math.round(alpha * 255).toString(16).padStart(2, '0')}`;
+        crescentCtx.fill();
+      }
+      
+      // 用 destination-out 模式擦除小圆区域
+      crescentCtx.globalCompositeOperation = 'destination-out';
+      
+      // 小圆也需要渐变边缘以获得柔和效果
+      const eraseSegments = 15;
+      for (let i = 0; i < eraseSegments; i++) {
+        const t = i / eraseSegments;
+        const r = innerRadius * (1 - t * 0.15); // 从100%到85%半径
+        const alpha = 1 - t * 0.8; // 边缘稍微柔和
+        
+        crescentCtx.beginPath();
+        crescentCtx.arc(center + offsetX, center, r, 0, Math.PI * 2);
+        crescentCtx.fillStyle = `rgba(0,0,0,${alpha})`;
+        crescentCtx.fill();
+      }
+      
+      // 将月牙绘制到主画布
+      ctx.drawImage(crescentCanvas, 0, 0);
+    }
+    
+    // ==================== 绘制四芒星尖峰 ====================
+    for (let i = 0; i < cfg.spikeCount; i++) {
+      const angle = rotationRad + (i * Math.PI * 2) / cfg.spikeCount;
+      
+      ctx.save();
+      ctx.translate(center, center);
+      ctx.rotate(angle);
+      
+      // 绘制一个方向的尖峰（使用多个渐变矩形叠加）
+      // 从中心向外绘制，宽度逐渐变窄，透明度逐渐降低
+      const segments = 20;
+      for (let j = 0; j < segments; j++) {
+        const t = j / segments;
+        const nextT = (j + 1) / segments;
+        const x1 = t * spikeLength;
+        const x2 = nextT * spikeLength;
+        
+        // 宽度从中心向外逐渐变窄
+        const w1 = spikeWidth * (1 - t * 0.9);
+        const w2 = spikeWidth * (1 - nextT * 0.9);
+        
+        // 透明度从中心向外逐渐降低（使用指数衰减）
+        const alpha1 = Math.pow(1 - t, cfg.falloffExponent);
+        const alpha2 = Math.pow(1 - nextT, cfg.falloffExponent);
+        
+        // 创建梯形路径
+        ctx.beginPath();
+        ctx.moveTo(x1, -w1 / 2);
+        ctx.lineTo(x2, -w2 / 2);
+        ctx.lineTo(x2, w2 / 2);
+        ctx.lineTo(x1, w1 / 2);
+        ctx.closePath();
+        
+        // 使用渐变填充
+        const gradient = ctx.createLinearGradient(x1, 0, x2, 0);
+        gradient.addColorStop(0, `${cfg.color}${Math.round(alpha1 * 255).toString(16).padStart(2, '0')}`);
+        gradient.addColorStop(1, `${cfg.color}${Math.round(alpha2 * 255).toString(16).padStart(2, '0')}`);
+        
+        ctx.fillStyle = gradient;
+        ctx.fill();
+      }
+      
+      ctx.restore();
+    }
+    
+    // 在中心添加一个明亮的核心
+    const coreSize = size * 0.06;
+    const coreGradient = ctx.createRadialGradient(center, center, 0, center, center, coreSize);
+    coreGradient.addColorStop(0, '#FFFFFF');
+    coreGradient.addColorStop(0.4, cfg.color);
+    coreGradient.addColorStop(1, `${cfg.color}00`);
+    ctx.beginPath();
+    ctx.arc(center, center, coreSize, 0, Math.PI * 2);
+    ctx.fillStyle = coreGradient;
+    ctx.fill();
+    
+    // 创建纹理
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    
+    // 创建 Sprite
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      color: 0xffffff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      opacity: 0, // 初始不可见，远距离时显示
+    });
+    
+    const sprite = new THREE.Sprite(spriteMaterial);
+    const baseSize = this.realRadius * cfg.lengthMultiplier * 4;
+    sprite.scale.set(baseSize, baseSize, 1);
+    sprite.renderOrder = 1000; // 在最前面渲染
+    
+    this.starSpikesSprite = sprite;
+    this.mesh.add(sprite);
   }
 
 
@@ -760,21 +910,41 @@ export class Planet {
     camera.getWorldPosition(camPos);
     const dist = sunWorldPos.distanceTo(camPos);
 
+    // ==================== 远距离增强计算 ====================
+    let farEnhanceFactor = 1.0;
+    const farStart = SUN_GLOW_CONFIG.farEnhanceStartDistance ?? 50;
+    const farEnd = SUN_GLOW_CONFIG.farEnhanceEndDistance ?? 200;
+    const farSizeMultiplier = SUN_GLOW_CONFIG.farEnhanceSizeMultiplier ?? 3.0;
+    const farOpacityMultiplier = SUN_GLOW_CONFIG.farEnhanceOpacityMultiplier ?? 1.5;
+    
+    if (dist >= farEnd) {
+      farEnhanceFactor = 1.0; // 最大增强
+    } else if (dist > farStart) {
+      farEnhanceFactor = (dist - farStart) / (farEnd - farStart);
+    } else {
+      farEnhanceFactor = 0;
+    }
+    
+    // 计算增强后的大小和不透明度倍数
+    const sizeEnhance = 1 + farEnhanceFactor * (farSizeMultiplier - 1);
+    const opacityEnhance = 1 + farEnhanceFactor * (farOpacityMultiplier - 1);
+
     // 控制屏幕空间大小：保持在一定的视觉角度范围内
     // 目标屏幕半径（world units）与相机距离的比例关系： size ~ apparentAngle * dist
     // 设定一个视觉角度（弧度）随 sun radius 调节
     const apparentAngle = Math.max(0.02, Math.min(0.8, (this.realRadius * 3) / (dist / 10)));
-    const targetSize = dist * apparentAngle;
+    const targetSize = dist * apparentAngle * sizeEnhance;
 
     // 平滑缩放
     const current = sprite.scale.x;
     const lerped = current + (targetSize - current) * 0.12;
     sprite.scale.set(lerped, lerped, 1);
 
-    // 根据距离调整不透明度（近时强，远时弱）
+    // 根据距离调整不透明度（近时强，远时弱，但远距离时增强）
     const mat = sprite.material as THREE.SpriteMaterial;
     if (mat) {
-      const intensity = Math.max(0.2, Math.min(1.6, (200 / (dist + 50))));
+      const baseIntensity = Math.max(0.2, Math.min(1.6, (200 / (dist + 50))));
+      const intensity = baseIntensity * opacityEnhance;
       mat.opacity = Math.min(1.0, SUN_GLOW_CONFIG.opacity * intensity);
       mat.needsUpdate = true;
     }
@@ -790,11 +960,38 @@ export class Planet {
         rs.scale.set(newRs, newRs, 1);
         const rmat = rs.material as THREE.SpriteMaterial;
         if (rmat) {
-          // 使远处更暗，近处更明显
-          const rIntensity = Math.max(0.02, Math.min(0.6, (120 / (dist + 30))));
-          rmat.opacity = layer.opacity * rIntensity;
+          // 使远处更暗，近处更明显，但远距离时增强
+          const baseRIntensity = Math.max(0.02, Math.min(0.6, (120 / (dist + 30))));
+          const rIntensity = baseRIntensity * opacityEnhance;
+          rmat.opacity = Math.min(1.0, layer.opacity * rIntensity);
           rmat.needsUpdate = true;
         }
+      }
+    }
+    
+    // ==================== 更新四芒星效果 ====================
+    if (this.starSpikesSprite && SUN_STAR_SPIKES_CONFIG.enabled) {
+      const spikeCfg = SUN_STAR_SPIKES_CONFIG;
+      const spikeMat = this.starSpikesSprite.material as THREE.SpriteMaterial;
+      
+      // 计算四芒星的显示程度（基于距离）
+      let spikeVisibility = 0;
+      if (dist >= spikeCfg.showFullDistance) {
+        spikeVisibility = 1.0;
+      } else if (dist > spikeCfg.showStartDistance) {
+        spikeVisibility = (dist - spikeCfg.showStartDistance) / (spikeCfg.showFullDistance - spikeCfg.showStartDistance);
+      }
+      
+      // 更新四芒星大小（与光晕成比例，但更大）
+      const spikeTargetSize = lerped * spikeCfg.lengthMultiplier;
+      const currentSpikeSize = this.starSpikesSprite.scale.x;
+      const newSpikeSize = currentSpikeSize + (spikeTargetSize - currentSpikeSize) * 0.1;
+      this.starSpikesSprite.scale.set(newSpikeSize, newSpikeSize, 1);
+      
+      // 更新四芒星不透明度
+      if (spikeMat) {
+        spikeMat.opacity = spikeCfg.opacity * spikeVisibility;
+        spikeMat.needsUpdate = true;
       }
     }
   }
