@@ -895,57 +895,48 @@ export class Planet {
   /**
    * 更新星球自转
    * 
-   * 自转围绕行星的自转轴进行，自转轴由 axialTilt 和 northPole 坐标决定。
-   * 由于我们已经通过 applyAxialTilt() 将网格旋转到正确的朝向，
-   * 自转只需要围绕网格的本地 Y 轴进行。
+   * 自转角度计算：
+   * W = W0 + W_dot * d （IAU 定义：本初子午线相对于春分点的角度）
    * 
-   * 使用绝对时间计算旋转角度，确保暂停后恢复时位置正确。
-   * 
-   * 自转角度计算公式（基于 IAU 行星旋转参数）：
-   * W = W0 + W_dot * d
-   * 其中：
-   * - W0 是 J2000.0 时刻的本初子午线经度（primeMeridianAtJ2000）
-   * - W_dot 是自转角速度（度/天）
-   * - d 是从 J2000.0 起的天数
+   * 贴图对齐：
+   * - 标准等距圆柱投影贴图：U=0.5 是本初子午线
+   * - Three.js SphereGeometry：U=0 对应方位角 0°
+   * - 贴图本初子午线在方位角 180° 位置
    * 
    * @param currentTimeInDays 当前时间（从 J2000.0 起的天数）
-   * @param timeSpeed 时间速度倍数（未使用，保留接口兼容性）
-   * @param isPlaying 是否正在播放（可选，默认 true）
    */
   updateRotation(currentTimeInDays: number, timeSpeed: number = 1, isPlaying: boolean = true): void {
     if (this.rotationSpeed === 0) return;
     
-    // 计算基于绝对时间的旋转角度
-    // rotationSpeed 是弧度/秒，需要转换为度/天
-    // 1 天 = 86400 秒
-    // rotationSpeed (rad/s) * 86400 (s/day) * (180/π) (deg/rad) = 度/天
+    // 计算自转角速度（度/天）
     const rotationRateDegreesPerDay = this.rotationSpeed * 86400 * (180 / Math.PI);
     
-    // 计算当前子午线经度（度）
-    // W = W0 + W_dot * d
-    const currentMeridianDegrees = this.primeMeridianAtJ2000 + rotationRateDegreesPerDay * currentTimeInDays;
+    // 计算 IAU W 角度
+    const W = this.primeMeridianAtJ2000 + rotationRateDegreesPerDay * currentTimeInDays;
     
-    // 转换为弧度
-    const totalRotation = currentMeridianDegrees * (Math.PI / 180);
+    // 贴图对齐：贴图本初子午线在 U=0.5（方位角 180°）
+    // 校准偏移：通过与 NASA JPL Eyes on the Solar System 对比验证
+    // 总偏移 = 180° + (-90°) = 90°
+    // 这个 90° 偏移源于场景坐标系的定义：
+    // - 场景 +X 指向春分点（黄道经度 0°）
+    // - 场景 +Y 指向黄道经度 90°
+    // - 未旋转时球体的"前方"（U=0）指向 +X
+    // - 但 IAU W 角度的参考点与我们的坐标系有 90° 的差异
+    const textureOffset = 180.0;
+    const calibrationOffset = -90.0;
+    const totalRotationDegrees = W + textureOffset + calibrationOffset;
+    const totalRotation = totalRotationDegrees * (Math.PI / 180);
     
-    // 获取当前的轴倾角四元数（applyAxialTilt 设置的）
-    // 我们需要在此基础上添加自转
-    if (!this.axialTiltApplied) {
-      this.applyAxialTilt();
-    }
-    
-    // 创建自转四元数（围绕本地 Y 轴）
-    const rotationQuaternion = new THREE.Quaternion();
-    rotationQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), totalRotation);
-    
-    // 先应用轴倾角，再应用自转
-    // 轴倾角四元数
+    // 计算轴倾角四元数
     const defaultAxis = new THREE.Vector3(0, 1, 0);
     const tiltQuaternion = new THREE.Quaternion();
     tiltQuaternion.setFromUnitVectors(defaultAxis, this.rotationAxis);
     
+    // 创建自转四元数
+    const rotationQuaternion = new THREE.Quaternion();
+    rotationQuaternion.setFromAxisAngle(defaultAxis, totalRotation);
+    
     // 组合：先自转，再倾斜
-    // mesh.quaternion = tiltQuaternion * rotationQuaternion
     const finalQuaternion = new THREE.Quaternion();
     finalQuaternion.multiplyQuaternions(tiltQuaternion, rotationQuaternion);
     

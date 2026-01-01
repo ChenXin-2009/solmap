@@ -220,7 +220,7 @@ export const CELESTIAL_BODIES: Record<string, CelestialBodyConfig> = {
     meanAnomalyAtEpoch: 100.5,
     orbitalPeriod: 365.25,
     rotationPeriod: 23.9345, // Sidereal day in hours (not solar day of 24h)
-    primeMeridianAtJ2000: 190.147, // GMST at J2000.0 converted to prime meridian angle
+    primeMeridianAtJ2000: 190.147, // IAU 2015 W0 value
     axialTilt: 23.44, // Earth's famous obliquity
     northPoleRA: 0.0, // By definition (ICRF aligned with Earth's equator at J2000.0)
     northPoleDec: 90.0, // North celestial pole
