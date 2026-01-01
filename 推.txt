@@ -23,9 +23,9 @@ git push origin v3.0.0
 ==================
 git status
 git add .
-git commit -m "Release 3.4.3: 优化轨道显示逻辑"
+git commit -m "Release 3.4.5: 添加银河系背景"
 git checkout main
 git pull origin main
-git tag v3.4.3
+git tag v3.4.5
 git push origin main
-git push origin v3.4.3
+git push origin v3.4.5

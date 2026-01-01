@@ -561,17 +561,24 @@ export default function SolarSystemCanvas3D() {
           }
         }
 
-        // 更新星空位置（固定在相机空间）
+        // 更新天空盒/星空位置（固定在相机空间）
         scene.traverse((object) => {
-          if (object.userData.isStarfield && object.userData.fixedToCamera) {
-            // 将星空位置设置为相机位置，但保持方向不变
-            // 这样星星会始终在视野中，不会随太阳系缩放
+          if (object.userData.fixedToCamera) {
+            // 将天空盒/星空位置设置为相机位置
             object.position.copy(camera.position);
-            // 使用一个很大的缩放因子，确保星星始终在视野内
-            const scale = Math.max(100, camera.position.length() * 10);
-            object.scale.set(scale, scale, scale);
+            
+            // 对于旧的星空点系统，需要缩放
+            if (object.userData.isStarfield) {
+              const scale = Math.max(100, camera.position.length() * 10);
+              object.scale.set(scale, scale, scale);
+            }
           }
         });
+        
+        // 同时调用 SceneManager 的天空盒更新方法（如果存在）
+        if (sceneManagerRef.current) {
+          sceneManagerRef.current.updateSkyboxPosition(camera.position);
+        }
         
         // 更新相机控制器（必须在渲染前调用，以应用阻尼效果）
         if (cameraControllerRef.current) {

@@ -5,7 +5,7 @@
  * - 初始化和管理 Three.js 场景、渲染器、相机
  * - 处理窗口大小变化
  * - 动态调整相机视距裁剪（防止近远平面裁切问题）
- * - 管理场景背景（星空效果）
+ * - 管理场景背景（银河系天空盒）
  * 
  * 使用：
  * - 在组件中创建 SceneManager 实例
@@ -16,11 +16,31 @@
 import * as THREE from 'three';
 import { VIEW_SETTINGS } from '../config/cameraConfig';
 
+// 银河系背景图片路径（圆柱投影/equirectangular）
+const MILKY_WAY_TEXTURE_PATH = '/textures/planets/8k_stars_milky_way.jpg';
+
+// 🔧 银河系天空盒方位配置（度）
+// 银道面与黄道面（太阳系轨道平面）之间约有 60° 夹角
+// 调整这些值可以改变银河系在场景中的方位
+const MILKY_WAY_ORIENTATION = {
+  // X轴旋转（俯仰）：控制银河系平面的倾斜角度
+  // 约 60° 是银道面与黄道面的真实夹角
+  rotationX: 60,
+  
+  // Y轴旋转（偏航）：控制银河系中心的水平方向
+  // 银河系中心大约在人马座方向
+  rotationY: 0,
+  
+  // Z轴旋转（滚转）：控制银河系的滚动角度
+  rotationZ: 0,
+};
+
 export class SceneManager {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private container: HTMLElement;
+  private skybox: THREE.Mesh | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -49,10 +69,10 @@ export class SceneManager {
 
     // 初始化场景
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x000000); // 黑色背景
+    this.scene.background = new THREE.Color(0x000000); // 黑色背景（图片加载前显示）
     
-    // 添加星空背景
-    this.createStarfield();
+    // 添加银河系天空盒背景
+    this.createMilkyWaySkybox();
 
     // 初始化相机（必须在 updateSize 之前）
     // 使用更小的 near 值（0.01）和更大的 far 值（1e12）以适应太阳系的大尺度
@@ -70,26 +90,68 @@ export class SceneManager {
   }
 
   /**
-   * 创建星空背景（固定在相机空间，不随太阳系缩放）
+   * 创建银河系天空盒背景（使用圆柱投影图片）
+   * 使用内翻球体 + equirectangular 贴图实现
    */
-  private createStarfield(): void {
-    // 创建星空几何体（使用 Points 系统）
-    // 星星应该固定在相机空间，而不是世界空间
+  private createMilkyWaySkybox(): void {
+    const textureLoader = new THREE.TextureLoader();
+    
+    textureLoader.load(
+      MILKY_WAY_TEXTURE_PATH,
+      (texture) => {
+        // 设置贴图参数
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        
+        // 创建一个大球体作为天空盒
+        const skyboxGeometry = new THREE.SphereGeometry(1000, 64, 32);
+        
+        // 创建材质（内翻球体，从内部看）
+        const skyboxMaterial = new THREE.MeshBasicMaterial({
+          map: texture,
+          side: THREE.BackSide, // 从内部渲染
+          depthWrite: false,
+          depthTest: false,
+        });
+        
+        this.skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
+        this.skybox.renderOrder = -1000; // 最先渲染（在最后面）
+        this.skybox.userData.isSkybox = true;
+        this.skybox.userData.fixedToCamera = true; // 标记为跟随相机
+        
+        // 设置银河系方位（将度转换为弧度）
+        const degToRad = Math.PI / 180;
+        this.skybox.rotation.x = MILKY_WAY_ORIENTATION.rotationX * degToRad;
+        this.skybox.rotation.y = MILKY_WAY_ORIENTATION.rotationY * degToRad;
+        this.skybox.rotation.z = MILKY_WAY_ORIENTATION.rotationZ * degToRad;
+        
+        this.scene.add(this.skybox);
+      },
+      undefined,
+      (error) => {
+        console.warn('Failed to load Milky Way texture, falling back to starfield:', error);
+        // 加载失败时回退到简单星空
+        this.createFallbackStarfield();
+      }
+    );
+  }
+
+  /**
+   * 创建备用星空背景（当银河系图片加载失败时使用）
+   */
+  private createFallbackStarfield(): void {
     const starCount = 2000;
     const stars = new Float32Array(starCount * 3);
     const starSizes = new Float32Array(starCount);
     
     for (let i = 0; i < starCount; i++) {
-      // 在单位球面上随机分布星星（归一化方向向量）
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(Math.random() * 2 - 1);
       
-      // 使用单位向量，星星位置相对于相机固定
       stars[i * 3] = Math.sin(phi) * Math.cos(theta);
       stars[i * 3 + 1] = Math.sin(phi) * Math.sin(theta);
       stars[i * 3 + 2] = Math.cos(phi);
       
-      // 随机星星大小（0.5-2像素）
       starSizes[i] = Math.random() * 1.5 + 0.5;
     }
     
@@ -97,27 +159,30 @@ export class SceneManager {
     geometry.setAttribute('position', new THREE.BufferAttribute(stars, 3));
     geometry.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
     
-    // 使用 PointsMaterial 渲染星星
     const material = new THREE.PointsMaterial({
       color: 0xffffff,
       size: 1,
-      sizeAttenuation: false, // 星星大小不随距离变化
-      transparent: false, // 不透明
-      depthWrite: false, // 不写入深度缓冲（星空始终在最后面）
-      depthTest: false, // 不进行深度测试（星空始终可见，但会被其他物体遮挡）
+      sizeAttenuation: false,
+      transparent: false,
+      depthWrite: false,
+      depthTest: false,
     });
     
     const starfield = new THREE.Points(geometry, material);
-    
-    // 设置渲染顺序：负数表示先渲染（在最后面）
     starfield.renderOrder = -1000;
-    
-    // 将星空添加到场景，但使用特殊的渲染方式
-    // 在动画循环中，我们需要将星空位置更新为相机位置
-    starfield.userData.isStarfield = true; // 标记为星空
-    starfield.userData.fixedToCamera = true; // 固定在相机空间
+    starfield.userData.isStarfield = true;
+    starfield.userData.fixedToCamera = true;
     
     this.scene.add(starfield);
+  }
+
+  /**
+   * 更新天空盒位置（跟随相机）
+   */
+  updateSkyboxPosition(cameraPosition: THREE.Vector3): void {
+    if (this.skybox) {
+      this.skybox.position.copy(cameraPosition);
+    }
   }
 
   updateSize(): void {
