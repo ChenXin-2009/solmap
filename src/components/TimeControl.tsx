@@ -1,12 +1,14 @@
 /**
  * 时间控制组件
- * 显示当前时间，提供前进/后退按钮
+ * 显示当前时间，提供弧形滑块控制时间流速
  */
 
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSolarSystemStore } from '@/lib/state';
+import TimeSlider from './TimeSlider';
+import { TIME_CONTROL_CONFIG, TIME_SLIDER_CONFIG } from '@/lib/config/visualConfig';
 
 // 使用节流来减少时间显示的更新频率
 function useThrottledTime(currentTime: Date, interval: number = 100) {
@@ -36,11 +38,6 @@ const TimeControl = React.memo(() => {
   const currentTime = useSolarSystemStore((state) => state.currentTime);
   const setCurrentTime = useSolarSystemStore((state) => state.setCurrentTime);
   const lang = useSolarSystemStore((state) => state.lang);
-  const isPlaying = useSolarSystemStore((state) => state.isPlaying);
-  const timeSpeed = useSolarSystemStore((state) => state.timeSpeed);
-  const playDirection = useSolarSystemStore((state) => state.playDirection);
-  const startPlaying = useSolarSystemStore((state) => state.startPlaying);
-  const togglePlayPause = useSolarSystemStore((state) => state.togglePlayPause);
   
   const calendarButtonRef = useRef<HTMLButtonElement>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -66,17 +63,6 @@ const TimeControl = React.memo(() => {
   const PRECISION_THRESHOLD_DAYS = 36525; // 100年
   const showPrecisionWarning = absTimeDiff > PRECISION_THRESHOLD_DAYS;
 
-  // 格式化日期时间（已废弃，改用 formatDate 和 formatTime）
-  const formatDateTime = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-  };
-  
   // 格式化时间（时分秒）
   const formatTime = (date: Date): string => {
     const hours = String(date.getHours()).padStart(2, '0');
@@ -116,14 +102,6 @@ const TimeControl = React.memo(() => {
     }
   };
 
-  // 速度预设值：每秒前进多少天
-  // 1天 = 1天，1月 ≈ 30天，1年 = 365天
-  const speedPresets = [
-    { value: 1, label: lang === 'zh' ? '天' : 'Day', type: 'day' },      // 每秒前进1天
-    { value: 30, label: lang === 'zh' ? '月' : 'Month', type: 'month' },   // 每秒前进30天（约1个月）
-    { value: 365, label: lang === 'zh' ? '年' : 'Year', type: 'year' },   // 每秒前进365天（1年）
-  ];
-
   // 处理日期选择
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newDate = new Date(e.target.value);
@@ -144,214 +122,175 @@ const TimeControl = React.memo(() => {
     }
   };
 
-  // 处理时间前进/后退按钮点击
-  const handleSpeedButtonClick = (speed: number, direction: 'forward' | 'backward') => {
-    // 如果当前正在播放且速度和方向相同，则暂停
-    if (isPlaying && timeSpeed === speed && playDirection === direction) {
-      useSolarSystemStore.getState().togglePlayPause();
-    } else {
-      // 否则开始播放（或切换速度和方向）
-      startPlaying(speed, direction);
-    }
-  };
-
   // 处理"现在"按钮点击
   const handleNowClick = () => {
     const now = new Date();
     setCurrentTime(now);
-    // 如果正在播放，继续播放；否则不自动播放
   };
+
+  const cfg = TIME_CONTROL_CONFIG;
 
   return (
     <>
-      {/* 主控制行：速度按钮（左） | 时间显示 | 速度按钮（右） */}
-      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-center gap-2 sm:gap-4 px-2 sm:px-4 py-2 sm:py-2.5" style={{ willChange: 'auto', transform: 'translateZ(0)', pointerEvents: 'auto' }}>
-            {/* 中间时间显示区域 */}
-            <div className="flex flex-col items-center gap-1 min-w-0 px-2 relative">
-              <div className="flex items-center gap-2">
-                {/* 后退按钮组 - 年月天（箭头向左） */}
-                <div className="flex items-center gap-1">
-                  {speedPresets.slice().reverse().map((preset) => {
-                    const isActive = isPlaying && timeSpeed === preset.value && playDirection === 'backward';
-                    return (
-          <button
-                        key={`back-${preset.value}`}
-                        onClick={() => handleSpeedButtonClick(preset.value, 'backward')}
-                        className={`p-1.5 rounded transition-colors ${
-                          isActive
-                            ? 'bg-red-500 text-white'
-                            : 'bg-white/10 hover:bg-white/20 text-white'
-                        }`}
-                        title={`${lang === 'zh' ? '后退速度' : 'Backward speed'}: ${preset.value}x (${preset.label})`}
+      {/* 主控制行：日期 | 状态/日历 | 时间 */}
+      <div 
+        className="absolute left-0 right-0 z-10 flex flex-col items-center px-2 sm:px-4" 
+        style={{ 
+          bottom: `${cfg.bottomOffset}px`,
+          gap: `${cfg.gapMobile}px`,
+          willChange: 'auto', 
+          transform: 'translateZ(0)', 
+          pointerEvents: 'none' 
+        }}
+      >
+        {/* 时间信息行 - 一行显示，使用固定宽度中间区域，禁止换行 */}
+        <div 
+          className="flex items-center justify-center flex-nowrap" 
+          style={{ 
+            pointerEvents: 'none',
+            gap: `${cfg.gapMobile}px`,
+            flexWrap: 'nowrap',
+          }}
+        >
+          {/* 左边：日期 - 固定宽度右对齐 */}
+          <div 
+            className="font-mono font-semibold text-right" 
+            style={{ 
+              pointerEvents: 'none', 
+              color: cfg.textColor,
+              fontSize: `${cfg.dateTimeSizeMobile}px`,
+              width: `${cfg.dateTimeWidth}px`,
+              flexShrink: 0,
+            }} 
+            suppressHydrationWarning
           >
-                        <svg 
-                          xmlns="http://www.w3.org/2000/svg" 
-                          width="16" 
-                          height="16" 
-                          viewBox="0 0 24 24" 
-                          fill="none" 
-                          stroke="currentColor" 
-                          strokeWidth="2" 
-                          strokeLinecap="round" 
-                          strokeLinejoin="round"
-                        >
-                          <polyline points="15 18 9 12 15 6"></polyline>
-                        </svg>
-          </button>
-                    );
-                  })}
-                </div>
-                {/* 暂停/播放按钮 */}
-          <button
-                  onClick={togglePlayPause}
-                  className={`p-1.5 rounded transition-colors ${
-                    isPlaying
-                      ? 'bg-red-500/80 hover:bg-red-500 text-white'
-                      : 'bg-green-500/80 hover:bg-green-500 text-white'
-                  }`}
-                  title={isPlaying ? (lang === 'zh' ? '暂停' : 'Pause') : (lang === 'zh' ? '播放' : 'Play')}
+            {formatDate(displayTime)}
+          </div>
+          
+          {/* 中间：时间差/现在 + 日历按钮 - 固定宽度居中 */}
+          <div 
+            className="flex items-center justify-center gap-2" 
+            style={{ 
+              pointerEvents: 'none',
+              width: `${cfg.middleSectionWidth}px`,
+              flexShrink: 0,
+            }}
+          >
+            {absTimeDiff > 0.01 && realTime ? (
+              <>
+                <div 
+                  className="font-bold" 
+                  style={{ 
+                    pointerEvents: 'none', 
+                    color: timeDiff > 0 ? cfg.futureColor : cfg.pastColor,
+                    fontSize: `${cfg.timeDiffSizeMobile}px`,
+                    whiteSpace: 'nowrap',
+                  }}
                 >
-                  {isPlaying ? (
-                    <svg 
-                      xmlns="http://www.w3.org/2000/svg" 
-                      width="16" 
-                      height="16" 
-                      viewBox="0 0 24 24" 
-                      fill="currentColor" 
-                      stroke="currentColor" 
-                      strokeWidth="2" 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round"
-                    >
-                      <rect x="6" y="4" width="4" height="16"></rect>
-                      <rect x="14" y="4" width="4" height="16"></rect>
-                    </svg>
-                  ) : (
-                    <svg 
-                      xmlns="http://www.w3.org/2000/svg" 
-                      width="16" 
-                      height="16" 
-                      viewBox="0 0 24 24" 
-                      fill="currentColor" 
-                      stroke="currentColor" 
-                      strokeWidth="2" 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round"
-                    >
-                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                    </svg>
-                  )}
-          </button>
-                
-                {/* 时间显示 - 年月日在上，时分秒在下 */}
-                <div className="flex flex-col items-center gap-0.5">
-                  {/* 年月日 */}
-                  <div className="text-white text-sm sm:text-base font-mono font-semibold" suppressHydrationWarning>
-                    {formatDate(displayTime)}
-                  </div>
-                  {/* 时分秒 - 字体更大 */}
-                  <div className="text-white text-base sm:text-xl font-mono font-semibold" suppressHydrationWarning>
-                    {formatTime(displayTime)}
-                  </div>
+                  {timeDiff > 0 
+                    ? (lang === 'zh' ? `未来 ${formatTimeDiff(timeDiff)}` : `+${formatTimeDiff(timeDiff)}`)
+                    : (lang === 'zh' ? `过去 ${formatTimeDiff(absTimeDiff)}` : `-${formatTimeDiff(absTimeDiff)}`)
+                  }
                 </div>
-                
-                {/* 日历按钮 */}
-          <button
-                  ref={calendarButtonRef}
-                  onClick={handleCalendarClick}
-                  className="text-white hover:text-blue-400 transition-colors cursor-pointer p-1"
-                  title={lang === 'zh' ? '选择日期' : 'Select date'}
+                <button
+                  onClick={handleNowClick}
+                  className="transition-colors font-medium"
+                  title={lang === 'zh' ? '跳转到现在' : 'Jump to now'}
+                  style={{ 
+                    pointerEvents: 'auto',
+                    backgroundColor: cfg.nowButtonBg,
+                    color: cfg.nowButtonTextColor,
+                    fontSize: `${cfg.nowButtonTextSize}px`,
+                    padding: cfg.nowButtonPadding,
+                    borderRadius: `${cfg.nowButtonRadius}px`,
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = cfg.nowButtonHoverBg}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = cfg.nowButtonBg}
                 >
-                  <svg 
-                    xmlns="http://www.w3.org/2000/svg" 
-                    width="20" 
-                    height="20" 
-                    viewBox="0 0 24 24" 
-                    fill="none" 
-                    stroke="currentColor" 
-                    strokeWidth="2" 
-                    strokeLinecap="round" 
-                    strokeLinejoin="round"
-                    className="text-white"
-                  >
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                    <line x1="16" y1="2" x2="16" y2="6"></line>
-                    <line x1="8" y1="2" x2="8" y2="6"></line>
-                    <line x1="3" y1="10" x2="21" y2="10"></line>
-                  </svg>
-          </button>
-                
-                {/* 前进按钮组 - 年月天（箭头向右） */}
-                <div className="flex items-center gap-1">
-                  {speedPresets.map((preset) => {
-                    const isActive = isPlaying && timeSpeed === preset.value && playDirection === 'forward';
-                    return (
-          <button
-                        key={`forward-${preset.value}`}
-                        onClick={() => handleSpeedButtonClick(preset.value, 'forward')}
-                        className={`p-1.5 rounded transition-colors ${
-                          isActive
-                            ? 'bg-green-500 text-white'
-                            : 'bg-white/10 hover:bg-white/20 text-white'
-                        }`}
-                        title={`${lang === 'zh' ? '前进速度' : 'Forward speed'}: ${preset.value}x (${preset.label})`}
-                      >
-                        <svg 
-                          xmlns="http://www.w3.org/2000/svg" 
-                          width="16" 
-                          height="16" 
-                          viewBox="0 0 24 24" 
-                          fill="none" 
-                          stroke="currentColor" 
-                          strokeWidth="2" 
-                          strokeLinecap="round" 
-                          strokeLinejoin="round"
-                        >
-                          <polyline points="9 18 15 12 9 6"></polyline>
-                        </svg>
-          </button>
-                    );
-                  })}
-                </div>
-        </div>
-
-              {/* 时间差显示和"现在"按钮 */}
-              <div className="flex items-center gap-2">
-                {absTimeDiff > 0.01 && realTime ? (
-                  <>
-            <div className={`text-xs font-bold ${timeDiff > 0 ? 'text-blue-400' : 'text-orange-400'}`}>
-              {timeDiff > 0 
-                ? (lang === 'zh' ? `未来 ${formatTimeDiff(timeDiff)}` : `Future ${formatTimeDiff(timeDiff)}`)
-                : (lang === 'zh' ? `过去 ${formatTimeDiff(absTimeDiff)}` : `Past ${formatTimeDiff(absTimeDiff)}`)
-              }
-                    </div>
-                    <button
-                      onClick={handleNowClick}
-                      className="px-2 py-0.5 text-xs bg-blue-500/80 hover:bg-blue-500 text-white rounded transition-colors font-medium"
-                      title={lang === 'zh' ? '跳转到现在' : 'Jump to now'}
-                    >
-                      {lang === 'zh' ? '现在' : 'Now'}
-                    </button>
-                  </>
-                ) : (
-                  <div className="text-xs font-bold text-green-400">
-                    {lang === 'zh' ? '现在' : 'Now'}
-            </div>
-          )}
+                  {lang === 'zh' ? '现在' : 'Now'}
+                </button>
+              </>
+            ) : (
+              <div 
+                className="font-bold" 
+                style={{ 
+                  pointerEvents: 'none', 
+                  color: cfg.nowColor,
+                  fontSize: `${cfg.timeDiffSizeMobile}px`,
+                }}
+              >
+                {lang === 'zh' ? '现在' : 'Now'}
               </div>
-              
-              {/* 精度警告 */}
-          {showPrecisionWarning && (
-            <div className="text-xs text-yellow-400 flex items-center gap-1 font-medium">
-              <span>⚠️</span>
-              <span>{lang === 'zh' ? '时移较远，精度可能降低' : 'Time shift is large, accuracy may be reduced'}</span>
-            </div>
-          )}
+            )}
+            
+            {/* 日历按钮 */}
+            <button
+              ref={calendarButtonRef}
+              onClick={handleCalendarClick}
+              className="transition-colors cursor-pointer p-0.5"
+              title={lang === 'zh' ? '选择日期' : 'Select date'}
+              style={{ pointerEvents: 'auto', color: cfg.calendarButtonColor }}
+              onMouseEnter={(e) => e.currentTarget.style.color = cfg.calendarButtonHoverColor}
+              onMouseLeave={(e) => e.currentTarget.style.color = cfg.calendarButtonColor}
+            >
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width={cfg.calendarButtonSize} 
+                height={cfg.calendarButtonSize} 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+              >
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="2" x2="16" y2="6"></line>
+                <line x1="8" y1="2" x2="8" y2="6"></line>
+                <line x1="3" y1="10" x2="21" y2="10"></line>
+              </svg>
+            </button>
+          </div>
+          
+          {/* 右边：时间 - 固定宽度左对齐 */}
+          <div 
+            className="font-mono font-semibold text-left" 
+            style={{ 
+              pointerEvents: 'none', 
+              color: cfg.textColor,
+              fontSize: `${cfg.dateTimeSizeMobile}px`,
+              width: `${cfg.dateTimeWidth}px`,
+              flexShrink: 0,
+            }} 
+            suppressHydrationWarning
+          >
+            {formatTime(displayTime)}
+          </div>
         </div>
+        
+        {/* 精度警告 */}
+        {showPrecisionWarning && (
+          <div 
+            className="flex items-center gap-1 font-medium" 
+            style={{ 
+              pointerEvents: 'none', 
+              color: cfg.warningColor,
+              fontSize: `${cfg.warningSize}px`,
+            }}
+          >
+            <span>⚠️</span>
+            <span>{lang === 'zh' ? '精度可能降低' : 'Accuracy may be reduced'}</span>
+          </div>
+        )}
+
+        {/* 弧形时间滑块 */}
+        <div style={{ pointerEvents: 'auto' }}>
+          <TimeSlider width={TIME_SLIDER_CONFIG.width} height={TIME_SLIDER_CONFIG.height} />
         </div>
+      </div>
 
       {/* 隐藏的日期输入框，用于直接打开日历选择器 */}
-            <input
+      <input
         ref={dateInputRef}
         type="date"
         value={formatDate(displayTime)}
@@ -359,7 +298,7 @@ const TimeControl = React.memo(() => {
         className="hidden"
         max={formatDate(new Date(2100, 11, 31))}
         min={formatDate(new Date(1900, 0, 1))}
-            />
+      />
     </>  
   );
 });

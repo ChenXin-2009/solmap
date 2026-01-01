@@ -914,3 +914,254 @@ export const SATURN_RING_CONFIG = {
   /** 环是否投射阴影（性能开销较大） */
   castShadow: false,
 };
+
+
+/**
+ * 距离显示组件配置
+ * 
+ * 控制左侧距离地球显示面板的样式
+ */
+export const DISTANCE_DISPLAY_CONFIG = {
+  // ==================== 位置配置 ====================
+  
+  /** 距离左边的距离（像素） */
+  left: 5,
+  
+  /** 垂直位置：'center' = 垂直居中，或具体像素值 */
+  verticalPosition: 'center' as 'center' | number,
+  
+  // ==================== 样式配置 ====================
+  
+  /** 背景颜色（支持 rgba），设为 'transparent' 去掉背景 */
+  backgroundColor: 'transparent',
+  
+  /** 背景模糊程度（像素），设为 0 去掉模糊 */
+  backdropBlur: 0,
+  
+  /** 圆角大小（像素） */
+  borderRadius: 0,
+  
+  /** 内边距（像素） */
+  padding: {
+    vertical: 0,
+    horizontal: 0,
+  },
+  
+  // ==================== 文字配置 ====================
+  
+  /** 标题文字（第一行） */
+  titleText: '您现在距离地球',
+  
+  /** 标题字体大小（像素） */
+  titleFontSize: 12,
+  
+  /** 标题透明度（0-1） */
+  titleOpacity: 0.8,
+  
+  /** 数值字体大小（像素） */
+  valueFontSize: 16,
+  
+  /** 数值字体粗细 */
+  valueFontWeight: 'bold' as string,
+  
+  /** 单位字体大小（像素） */
+  unitFontSize: 15,
+  
+  /** 单位透明度（0-1） */
+  unitOpacity: 0.9,
+  
+  /** 行间距（像素） */
+  lineGap: 1,
+  
+  /** 文字颜色 */
+  textColor: '#ffffff',
+  
+  /** 字体族 */
+  fontFamily: '"SourceHanSerifCN", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  
+  /** 文字阴影 */
+  textShadow: '0 0 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)',
+  
+  // ==================== 层级配置 ====================
+  
+  /** z-index 层级 */
+  zIndex: 10,
+};
+
+
+/**
+ * 时间滑块组件配置
+ * 
+ * 控制底部弧形时间滑块的样式和行为
+ */
+export const TIME_SLIDER_CONFIG = {
+  // ==================== 尺寸配置 ====================
+  
+  /** 滑块宽度（像素）- 同时控制弧线长度 */
+  width: 600,
+  
+  /** 滑块高度（像素） */
+  height: 35,
+  
+  /** 弧线深度比例（相对于高度，0-1，值越大弧度越深） */
+  arcDepthRatio: 0.6,
+  
+  /** 滑块圆圈半径（像素） */
+  sliderRadius: 10,
+  
+  /** 轨道两端留白（像素） */
+  trackPadding: 4,
+  
+  /** 弧线最小宽度（像素，两端） */
+  trackMinWidth: 1,
+  
+  /** 弧线最大宽度（像素，中间） */
+  trackMaxWidth: 4,
+  
+  // ==================== 速度配置 ====================
+  
+  /** 最大速度（天/秒）- 滑块在最边缘时的速度 */
+  maxSpeed: 365,
+  
+  /** 速度曲线指数 - 值越大，边缘加速越明显 */
+  speedExponent: 2.5,
+  
+  /** 死区比例 - 中心多大范围内视为暂停（0-1） */
+  deadZone: 0.05,
+  
+  // ==================== 颜色配置 ====================
+  
+  /** 弧线轨道颜色（两端） */
+  trackColorEnd: 'rgba(255, 255, 255, 0.1)',
+  
+  /** 弧线轨道颜色（中间） */
+  trackColorCenter: 'rgba(255, 255, 255, 0.4)',
+  
+  /** 前进时的高亮颜色（两端） */
+  forwardColorEnd: 'rgba(34, 197, 94, 0.1)',
+  
+  /** 前进时的高亮颜色（中间） */
+  forwardColorCenter: 'rgba(28, 66, 255, 0.6)',
+  
+  /** 后退时的高亮颜色（两端） */
+  backwardColorEnd: 'rgba(239, 68, 68, 0.1)',
+  
+  /** 后退时的高亮颜色（中间） */
+  backwardColorCenter: 'rgba(239, 68, 68, 0.6)',
+  
+  /** 滑块默认边框颜色 */
+  sliderBorderColor: 'rgba(255, 255, 255, 0.8)',
+  
+  /** 滑块前进时边框颜色 */
+  sliderForwardColor: '#4e5dffff',
+  
+  /** 滑块后退时边框颜色 */
+  sliderBackwardColor: '#ef4444',
+  
+  /** 滑块边框宽度（像素） */
+  sliderBorderWidth: 2,
+  
+  /** 滑块发光半径（像素） */
+  sliderGlowRadius: 12,
+  
+  // ==================== 速度文字配置 ====================
+  
+  /** 速度文字前进颜色 */
+  speedTextForwardColor: '#3799e9ff',
+  
+  /** 速度文字后退颜色 */
+  speedTextBackwardColor: '#ef4444',
+  
+  /** 速度文字大小（像素） */
+  speedTextSize: 15,
+  
+  /** 速度文字底部偏移（像素） */
+  speedTextBottom: -5,
+};
+
+/**
+ * 时间控件组件配置
+ * 
+ * 控制底部时间显示区域的样式
+ */
+export const TIME_CONTROL_CONFIG = {
+  // ==================== 文字颜色 ====================
+  
+  /** 日期/时间文字颜色 */
+  textColor: '#ffffff',
+  
+  /** 未来时间差颜色 */
+  futureColor: '#60a5fa',
+  
+  /** 过去时间差颜色 */
+  pastColor: '#fb923c',
+  
+  /** 当前时间（"现在"）颜色 */
+  nowColor: '#ffffffff',
+  
+  /** 精度警告颜色 */
+  warningColor: '#facc15',
+  
+  // ==================== 文字大小 ====================
+  
+  /** 日期/时间文字大小 - 移动端（像素） */
+  dateTimeSizeMobile: 20,
+  
+  /** 日期/时间文字大小 - 桌面端（像素） */
+  dateTimeSizeDesktop: 20,
+  
+  /** 时间差文字大小 - 移动端（像素） */
+  timeDiffSizeMobile: 14,
+  
+  /** 时间差文字大小 - 桌面端（像素） */
+  timeDiffSizeDesktop: 14,
+  
+  /** 警告文字大小（像素） */
+  warningSize: 14,
+  
+  // ==================== 按钮配置 ====================
+  
+  /** "现在"按钮背景色 */
+  nowButtonBg: 'rgba(59, 130, 246, 0.8)',
+  
+  /** "现在"按钮悬停背景色 */
+  nowButtonHoverBg: '#3b82f6',
+  
+  /** "现在"按钮文字颜色 */
+  nowButtonTextColor: '#ffffff',
+  
+  /** "现在"按钮文字大小（像素） */
+  nowButtonTextSize: 12,
+  
+  /** "现在"按钮圆角（像素） */
+  nowButtonRadius: 4,
+  
+  /** "现在"按钮内边距 */
+  nowButtonPadding: '2px 8px',
+  
+  /** 日历按钮颜色 */
+  calendarButtonColor: 'rgba(255, 255, 255, 0.6)',
+  
+  /** 日历按钮悬停颜色 */
+  calendarButtonHoverColor: '#ffffff',
+  
+  /** 日历按钮大小（像素） */
+  calendarButtonSize: 16,
+  
+  // ==================== 布局配置 ====================
+  
+  /** 底部距离（像素） */
+  bottomOffset: 20,
+  
+  /** 元素间距 - 移动端（像素） */
+  gapMobile: 12,
+  
+  /** 元素间距 - 桌面端（像素） */
+  gapDesktop: 30,
+  
+  /** 日期/时间区域固定宽度（像素） */
+  dateTimeWidth: 110,
+  
+  /** 中间区域（时间差/现在）固定宽度（像素） */
+  middleSectionWidth: 250,
+};

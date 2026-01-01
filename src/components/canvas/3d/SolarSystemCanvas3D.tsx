@@ -34,6 +34,7 @@ import * as THREE from 'three';
 import { Raycaster } from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import ScaleRuler from './ScaleRuler';
+import DistanceDisplay from './DistanceDisplay';
 import SettingsMenu from '@/components/SettingsMenu';
 import { ORBIT_COLORS, SUN_LIGHT_CONFIG, ORBIT_CURVE_POINTS, SATELLITE_CONFIG, ORBIT_FADE_CONFIG } from '@/lib/config/visualConfig';
 import { TextureManager } from '@/lib/3d/TextureManager';
@@ -143,6 +144,8 @@ export default function SolarSystemCanvas3D() {
   const [isCameraControllerReady, setIsCameraControllerReady] = useState(false);
   // 用于控制渐显效果
   const [opacity, setOpacity] = useState(0);
+  // 距离地球的距离（AU）
+  const [distanceToEarth, setDistanceToEarth] = useState(0);
 
   // 使用选择器避免不必要的重渲染
   // 3D组件不需要订阅这些状态，因为我们在动画循环中直接使用 getState()
@@ -583,6 +586,15 @@ export default function SolarSystemCanvas3D() {
         // 更新相机控制器（必须在渲染前调用，以应用阻尼效果）
         if (cameraControllerRef.current) {
           cameraControllerRef.current.update(deltaTime);
+        }
+
+        // 计算相机到地球的距离（用于左上角显示）
+        const earthBody = currentBodies.find((b: any) => b.name.toLowerCase() === 'earth');
+        if (earthBody) {
+          const earthPos = new THREE.Vector3(earthBody.x, earthBody.y, earthBody.z);
+          const cameraPos = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
+          const distToEarth = cameraPos.distanceTo(earthPos);
+          setDistanceToEarth(distToEarth);
         }
 
         // 动态调整视距裁剪
@@ -1193,6 +1205,8 @@ export default function SolarSystemCanvas3D() {
         // 让相机控制器完全处理所有触摸事件
       }}
     >
+      {/* 距离地球显示 */}
+      <DistanceDisplay distanceAU={distanceToEarth} />
       <ScaleRuler 
         camera={cameraRef.current} 
         container={containerRef.current}

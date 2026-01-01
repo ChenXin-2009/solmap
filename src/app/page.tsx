@@ -13,7 +13,12 @@ export default function SolarSystemPage() {
   return (
     <div 
       className="w-screen flex flex-col overflow-hidden relative"
-      style={{ height: '100vh' }}
+      style={{ 
+        height: '100vh',
+        // 使用 dvh 适配移动端动态视口
+        // @ts-ignore - dvh 是较新的 CSS 单位
+        height: '100dvh',
+      }}
     >
       {/* 主容器，漂浮模式下不需要留出Header高度空间 */}
       <div 
@@ -21,9 +26,11 @@ export default function SolarSystemPage() {
         style={{ 
           marginTop: `${headerHeight}px`,
           isolation: 'isolate',
+          // 确保不超出父容器
+          maxHeight: '100%',
         }}
       >
-        <div className="flex-1 relative min-h-0" style={{ isolation: 'isolate' }}>
+        <div className="flex-1 relative min-h-0" style={{ isolation: 'isolate', maxHeight: '100%' }}>
           <SolarSystemCanvas3D />
         </div>
         <TimeControl />
