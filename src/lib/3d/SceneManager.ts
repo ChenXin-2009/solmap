@@ -6,6 +6,7 @@
  * - 处理窗口大小变化
  * - 动态调整相机视距裁剪（防止近远平面裁切问题）
  * - 管理场景背景（银河系天空盒）
+ * - 多尺度宇宙视图（太阳系 → 近邻恒星 → 银河系）
  * 
  * 使用：
  * - 在组件中创建 SceneManager 实例
@@ -15,6 +16,9 @@
 
 import * as THREE from 'three';
 import { VIEW_SETTINGS } from '../config/cameraConfig';
+import { NearbyStars } from './NearbyStars';
+import { GalaxyRenderer } from './GalaxyRenderer';
+import { SCALE_VIEW_CONFIG, NEARBY_STARS_CONFIG, GALAXY_CONFIG } from '../config/galaxyConfig';
 
 // 银河系背景图片路径（圆柱投影/equirectangular）
 const MILKY_WAY_TEXTURE_PATH = '/textures/planets/8k_stars_milky_way.jpg';
@@ -41,6 +45,12 @@ export class SceneManager {
   private camera: THREE.PerspectiveCamera;
   private container: HTMLElement;
   private skybox: THREE.Mesh | null = null;
+  
+  // 多尺度宇宙视图组件
+  private nearbyStars: NearbyStars | null = null;
+  private galaxyRenderer: GalaxyRenderer | null = null;
+  private skyboxOpacity: number = 1;
+  private skyboxTargetOpacity: number = 1;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -84,9 +94,29 @@ export class SceneManager {
 
     // 设置渲染器尺寸（在相机初始化之后）
     this.updateSize();
+    
+    // 初始化多尺度宇宙视图组件
+    this.initializeMultiScaleView();
 
     // 光照将在 SolarSystemCanvas3D 中添加，这里不添加
     // 注意：窗口大小变化监听器由 SolarSystemCanvas3D 统一管理，避免重复绑定
+  }
+  
+  /**
+   * 初始化多尺度宇宙视图组件
+   */
+  private initializeMultiScaleView(): void {
+    // 初始化近邻恒星
+    if (NEARBY_STARS_CONFIG.enabled) {
+      this.nearbyStars = new NearbyStars();
+      this.scene.add(this.nearbyStars.getGroup());
+    }
+    
+    // 初始化银河系渲染器
+    if (GALAXY_CONFIG.enabled) {
+      this.galaxyRenderer = new GalaxyRenderer();
+      this.scene.add(this.galaxyRenderer.getGroup());
+    }
   }
 
   /**
@@ -103,8 +133,9 @@ export class SceneManager {
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.mapping = THREE.EquirectangularReflectionMapping;
         
-        // 创建一个大球体作为天空盒
-        const skyboxGeometry = new THREE.SphereGeometry(1000, 64, 32);
+        // 创建一个超大球体作为天空盒（确保在任何距离都不会被裁剪）
+        // 使用相对较大但固定的尺寸，避免动态缩放导致的抖动
+        const skyboxGeometry = new THREE.SphereGeometry(5e5, 64, 32);
         
         // 创建材质（内翻球体，从内部看）
         const skyboxMaterial = new THREE.MeshBasicMaterial({
@@ -184,6 +215,68 @@ export class SceneManager {
       this.skybox.position.copy(cameraPosition);
     }
   }
+  
+  /**
+   * 更新多尺度宇宙视图（每帧调用）
+   * @param cameraDistance 相机到太阳系中心的距离（AU）
+   * @param deltaTime 帧间隔时间（秒）
+   */
+  updateMultiScaleView(cameraDistance: number, deltaTime: number): void {
+    // 更新近邻恒星
+    if (this.nearbyStars) {
+      this.nearbyStars.update(cameraDistance, deltaTime);
+    }
+    
+    // 更新银河系
+    if (this.galaxyRenderer) {
+      this.galaxyRenderer.update(cameraDistance, deltaTime);
+    }
+    
+    // 更新银河系背景透明度（当显示银河系粒子时淡出背景）
+    this.updateSkyboxOpacity(cameraDistance, deltaTime);
+  }
+  
+  /**
+   * 更新银河系背景透明度
+   */
+  private updateSkyboxOpacity(cameraDistance: number, deltaTime: number): void {
+    const config = SCALE_VIEW_CONFIG;
+    
+    // 计算目标透明度
+    if (cameraDistance < config.milkyWayBackgroundFadeStart) {
+      this.skyboxTargetOpacity = 1;
+    } else if (cameraDistance < config.milkyWayBackgroundFadeEnd) {
+      const range = config.milkyWayBackgroundFadeEnd - config.milkyWayBackgroundFadeStart;
+      this.skyboxTargetOpacity = 1 - (cameraDistance - config.milkyWayBackgroundFadeStart) / range;
+    } else {
+      this.skyboxTargetOpacity = 0;
+    }
+    
+    // 直接应用透明度（无延迟）
+    this.skyboxOpacity = this.skyboxTargetOpacity;
+    
+    // 应用透明度到天空盒
+    if (this.skybox) {
+      const material = this.skybox.material as THREE.MeshBasicMaterial;
+      material.opacity = this.skyboxOpacity;
+      material.transparent = this.skyboxOpacity < 1;
+      this.skybox.visible = this.skyboxOpacity > 0.01;
+    }
+  }
+  
+  /**
+   * 获取近邻恒星渲染器
+   */
+  getNearbyStars(): NearbyStars | null {
+    return this.nearbyStars;
+  }
+  
+  /**
+   * 获取银河系渲染器
+   */
+  getGalaxyRenderer(): GalaxyRenderer | null {
+    return this.galaxyRenderer;
+  }
 
   updateSize(): void {
     const width = this.container.clientWidth || 1;
@@ -247,6 +340,18 @@ export class SceneManager {
 
   dispose(): void {
     // 注意：resize 监听器由 SolarSystemCanvas3D 统一管理，这里不需要移除
+    
+    // 清理多尺度宇宙视图组件
+    if (this.nearbyStars) {
+      this.nearbyStars.dispose();
+      this.nearbyStars = null;
+    }
+    
+    if (this.galaxyRenderer) {
+      this.galaxyRenderer.dispose();
+      this.galaxyRenderer = null;
+    }
+    
     // 清理 WebGL 资源
     this.renderer.dispose();
     // 从 DOM 中移除 canvas

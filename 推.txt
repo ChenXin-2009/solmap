@@ -23,9 +23,9 @@ git push origin v3.0.0
 ==================
 git status
 git add .
-git commit -m "Release 3.5.1: 可以使摄像机离太阳系到更远的位置"
+git commit -m "Release 4.0.0: 添加了系外恒星及银河系"
 git checkout main
 git pull origin main
-git tag v3.5.1
+git tag v4.0.0
 git push origin main
-git push origin v3.5.1
+git push origin v4.0.0

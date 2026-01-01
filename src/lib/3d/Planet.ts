@@ -933,11 +933,25 @@ export class Planet {
     // 目标屏幕半径（world units）与相机距离的比例关系： size ~ apparentAngle * dist
     // 设定一个视觉角度（弧度）随 sun radius 调节
     const apparentAngle = Math.max(0.02, Math.min(0.8, (this.realRadius * 3) / (dist / 10)));
-    const targetSize = dist * apparentAngle * sizeEnhance;
+    let targetSize = dist * apparentAngle * sizeEnhance;
 
-    // 平滑缩放
+    // ==================== 超远距离绝对尺寸限制 ====================
+    const veryFarStart = SUN_GLOW_CONFIG.veryFarLimitStartDistance ?? 5000;
+    const maxAbsSize = SUN_GLOW_CONFIG.maxAbsoluteSize ?? 100;
+    
+    // 超过 veryFarStart 后，限制最大尺寸
+    if (dist > veryFarStart) {
+      targetSize = Math.min(targetSize, maxAbsSize);
+    }
+
+    // 平滑缩放 - 在超远距离时使用更快的插值速度，避免快速拉近时光晕过大
     const current = sprite.scale.x;
-    const lerped = current + (targetSize - current) * 0.12;
+    // 当需要缩小时（拉近相机），使用更快的插值速度
+    const needsShrink = targetSize < current;
+    const lerpSpeed = needsShrink && dist > veryFarStart ? 0.5 : 0.12;
+    // 同时限制当前尺寸不超过最大值（防止快速拉近时的视觉问题）
+    const clampedCurrent = dist > veryFarStart ? Math.min(current, maxAbsSize * 1.2) : current;
+    const lerped = clampedCurrent + (targetSize - clampedCurrent) * lerpSpeed;
     sprite.scale.set(lerped, lerped, 1);
 
     // 根据距离调整不透明度（近时强，远时弱，但远距离时增强）
@@ -956,7 +970,10 @@ export class Planet {
         const layer = SUN_RAINBOW_LAYERS[i];
         const currentRs = rs.scale.x;
         const targetRs = lerped * (layer.radiusMultiplier / SUN_GLOW_CONFIG.radiusMultiplier);
-        const newRs = currentRs + (targetRs - currentRs) * 0.08;
+        // 使用与主光晕相同的快速插值逻辑
+        const rsNeedsShrink = targetRs < currentRs;
+        const rsLerpSpeed = rsNeedsShrink && dist > veryFarStart ? 0.5 : 0.08;
+        const newRs = currentRs + (targetRs - currentRs) * rsLerpSpeed;
         rs.scale.set(newRs, newRs, 1);
         const rmat = rs.material as THREE.SpriteMaterial;
         if (rmat) {
@@ -985,7 +1002,10 @@ export class Planet {
       // 更新四芒星大小（与光晕成比例，但更大）
       const spikeTargetSize = lerped * spikeCfg.lengthMultiplier;
       const currentSpikeSize = this.starSpikesSprite.scale.x;
-      const newSpikeSize = currentSpikeSize + (spikeTargetSize - currentSpikeSize) * 0.1;
+      // 使用与主光晕相同的快速插值逻辑
+      const spikeNeedsShrink = spikeTargetSize < currentSpikeSize;
+      const spikeLerpSpeed = spikeNeedsShrink && dist > veryFarStart ? 0.5 : 0.1;
+      const newSpikeSize = currentSpikeSize + (spikeTargetSize - currentSpikeSize) * spikeLerpSpeed;
       this.starSpikesSprite.scale.set(newSpikeSize, newSpikeSize, 1);
       
       // 更新四芒星不透明度

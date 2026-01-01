@@ -107,6 +107,14 @@ export const SUN_GLOW_CONFIG = {
   
   /** 远距离时光晕不透明度倍数 */
   farEnhanceOpacityMultiplier: 1.5,
+  
+  // ==================== 超远距离尺寸限制配置 ====================
+  
+  /** 超远距离限制开始距离（AU）- 超过此距离开始限制光晕增长 */
+  veryFarLimitStartDistance: 5000,
+  
+  /** 光晕最大绝对尺寸（AU）- 无论距离多远，光晕不会超过此尺寸 */
+  maxAbsoluteSize: 500000,
 };
 
 /**

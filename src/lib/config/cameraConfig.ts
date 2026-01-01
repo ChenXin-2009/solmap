@@ -49,7 +49,7 @@ export const ZOOM_LIMITS = {
   minDistance: 0.00001,
   
   /** 最大缩放距离（AU）- 可以缩小到很远观看整个太阳系 */
-  maxDistance: 500000000,
+  maxDistance: 500000000000,
   
   /** 缩放速度因子（OrbitControls 使用） */
   zoomSpeed: 1.5,

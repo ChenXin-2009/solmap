@@ -634,13 +634,15 @@ export default function SolarSystemCanvas3D() {
         }
 
         // 更新天空盒/星空位置（固定在相机空间）
+        // 注意：天空盒大小固定，不需要动态缩放，避免抖动
         scene.traverse((object) => {
           if (object.userData.fixedToCamera) {
             // 将天空盒/星空位置设置为相机位置
             object.position.copy(camera.position);
             
-            // 对于旧的星空点系统，需要缩放
-            if (object.userData.isStarfield) {
+            // 对于旧的星空点系统（备用），需要缩放
+            // 但天空盒（isSkybox）不需要缩放
+            if (object.userData.isStarfield && !object.userData.isSkybox) {
               const scale = Math.max(100, camera.position.length() * 10);
               object.scale.set(scale, scale, scale);
             }
@@ -911,6 +913,11 @@ export default function SolarSystemCanvas3D() {
             // 忽略错误
           }
         });
+
+        // 更新多尺度宇宙视图（近邻恒星、银河系）
+        if (sceneManagerRef.current) {
+          sceneManagerRef.current.updateMultiScaleView(distanceToSun, deltaTime);
+        }
 
         // 渲染顺序：先更新 controls，再渲染场景
         // 确保 OrbitControls 的 update() 在 render() 之前调用
