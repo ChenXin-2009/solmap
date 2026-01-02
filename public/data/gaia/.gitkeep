@@ -1,0 +1,10 @@
+# Gaia DR3 星表数据目录
+# 将 .bin 文件放在此目录下
+# 
+# 二进制结构（每颗恒星 24 字节）：
+# - float32 x      (parsec)
+# - float32 y      (parsec)
+# - float32 z      (parsec)
+# - float32 mag    (G波段星等)
+# - float32 bp_rp  (颜色指数)
+# - float32 padding

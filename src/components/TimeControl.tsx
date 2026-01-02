@@ -38,12 +38,23 @@ const TimeControl = React.memo(() => {
   const currentTime = useSolarSystemStore((state) => state.currentTime);
   const setCurrentTime = useSolarSystemStore((state) => state.setCurrentTime);
   const lang = useSolarSystemStore((state) => state.lang);
+  const cameraDistance = useSolarSystemStore((state) => state.cameraDistance);
   
   const calendarButtonRef = useRef<HTMLButtonElement>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
   
   // 使用 useState 和 useEffect 来避免 hydration 错误
   const [realTime, setRealTime] = useState<Date | null>(null);
+  
+  // 计算时间控件的透明度（3000AU 开始淡出，5000AU 完全隐藏）
+  const TIME_CONTROL_FADE_START = 3000;
+  const TIME_CONTROL_FADE_END = 5000;
+  let timeControlOpacity = 1;
+  if (cameraDistance >= TIME_CONTROL_FADE_END) {
+    timeControlOpacity = 0;
+  } else if (cameraDistance > TIME_CONTROL_FADE_START) {
+    timeControlOpacity = 1 - (cameraDistance - TIME_CONTROL_FADE_START) / (TIME_CONTROL_FADE_END - TIME_CONTROL_FADE_START);
+  }
   
   useEffect(() => {
     // 只在客户端设置真实时间
@@ -128,6 +139,11 @@ const TimeControl = React.memo(() => {
     setCurrentTime(now);
   };
 
+  // 如果完全透明，不渲染
+  if (timeControlOpacity <= 0) {
+    return null;
+  }
+
   const cfg = TIME_CONTROL_CONFIG;
 
   return (
@@ -140,7 +156,9 @@ const TimeControl = React.memo(() => {
           gap: `${cfg.gapMobile}px`,
           willChange: 'auto', 
           transform: 'translateZ(0)', 
-          pointerEvents: 'none' 
+          pointerEvents: 'none',
+          opacity: timeControlOpacity,
+          transition: 'opacity 0.3s ease-out',
         }}
       >
         {/* 时间信息行 - 一行显示，使用固定宽度中间区域，禁止换行 */}

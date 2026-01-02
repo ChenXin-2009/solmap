@@ -530,6 +530,9 @@ export default function SolarSystemCanvas3D() {
         // 计算相机到太阳系中心（太阳）的距离
         const distanceToSun = camera.position.length();
         
+        // 更新全局状态中的相机距离
+        useSolarSystemStore.getState().setCameraDistance(distanceToSun);
+        
         // 计算远距离时的行星、轨道、标签透明度
         let farViewPlanetOpacity = 1.0;
         let farViewOrbitOpacity = 1.0;

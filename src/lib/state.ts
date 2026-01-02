@@ -37,6 +37,7 @@ export interface SolarSystemState {
   // ========== 视图状态 ==========
   viewOffset: ViewOffset;
   zoom: number;
+  cameraDistance: number; // 相机距离（AU）
 
   // ========== 语言 ==========
   lang: Language;               // 当前语言
@@ -52,6 +53,7 @@ export interface SolarSystemState {
   selectPlanet: (name: string | null) => void;
   setViewOffset: (offset: ViewOffset) => void;
   setZoom: (zoom: number) => void;
+  setCameraDistance: (distance: number) => void;
   centerOnPlanet: (name: string) => void;
   resetToNow: () => void;
   resetView: () => void;
@@ -81,6 +83,7 @@ export const useSolarSystemStore = create<SolarSystemState>((set, get) => {
     selectedPlanet: null,
     viewOffset: { x: 0, y: 0 },
     zoom: DEFAULT_ZOOM,
+    cameraDistance: 100, // 默认相机距离
     
     // ========== 语言 ==========
     lang: 'zh', // 默认中文
@@ -142,6 +145,10 @@ export const useSolarSystemStore = create<SolarSystemState>((set, get) => {
     setZoom: (zoom: number) => {
       const clampedZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
       set({ zoom: clampedZoom });
+    },
+    
+    setCameraDistance: (distance: number) => {
+      set({ cameraDistance: distance });
     },
     
     centerOnPlanet: (name: string) => {

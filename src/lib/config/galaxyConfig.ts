@@ -47,15 +47,15 @@ export const GALAXY_CONFIG = {
   topViewOpacity: 1.0,
   topViewScale: 1.0,
   // 立体厚度配置
-  layerCount: 50,             // 层数（更多层减少分层感）
+  layerCount: 3,             // 层数（更多层减少分层感）
   layerThicknessLY: 2000,     // 总厚度（光年）
-  layerOpacity: 0.03,         // 每层透明度
+  layerOpacity: 0.3,         // 每层透明度
   bulgeFactor: 2,             // 凸起强度系数（相对于厚度）
   bulgeExponent: 4,           // 圆盘区域衰减指数
-  coreRadius: 0.15,           // 核球半径（相对于银河系半径）
-  coreThicknessFactor: 1.001,   // 核球厚度倍数
+  coreRadius: 0.1,           // 核球半径（相对于银河系半径）
+  coreThicknessFactor: 0.0001,   // 核球厚度倍数
   diskMinThickness: 0.2,     // 圆盘最小厚度（相对于最大厚度）
-  layerJitter: 5,             // 层高度随机抖动（减少分层感）
+  layerJitter: 0,             // 层高度随机抖动（减少分层感）
   coreBrightness: 1,          // 核心亮度倍数
   // 翘曲配置（银河系边缘一侧向上翘，另一侧向下弯）
   warpEnabled: true,          // 是否启用翘曲
@@ -65,7 +65,7 @@ export const GALAXY_CONFIG = {
   // 侧视图配置
   sideViewEnabled: true,      // 是否启用侧视图
   sideViewTexturePath: '/textures/planets/MilkyWaySide_Gaia_5000_2.jpg',
-  sideViewOpacity: 0.03,       // 侧视图透明度
+  sideViewOpacity: 0.05,       // 侧视图透明度
   sideViewCount: 30,           // 侧视图数量（均匀分布）
   // 旋转配置（度）
   rotationX: -90,
