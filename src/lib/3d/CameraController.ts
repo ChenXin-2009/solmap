@@ -98,7 +98,8 @@ export class CameraController {
     
     // 确保每帧都更新阻尼（即使没有输入）
     this.controls.enableRotate = true;
-    this.controls.enablePan = true;
+    // 🔧 禁用平移功能，防止焦点漂移
+    this.controls.enablePan = false;
     
     // 初始化距离
     this.smoothDistance = this.camera.position.distanceTo(this.controls.target);
@@ -111,7 +112,8 @@ export class CameraController {
     this.controls.maxDistance = CAMERA_CONFIG.maxDistance;
     
     // 启用各种操作
-    this.controls.enablePan = true; // 启用平移
+    // 🔧 禁用平移，防止焦点漂移（Ctrl/Shift+拖动、双指平移）
+    this.controls.enablePan = false;
     this.controls.enableRotate = true; // 启用旋转
     
     // 缩放平滑度配置
@@ -123,11 +125,10 @@ export class CameraController {
     this.controls.enableZoom = false;
     
     // 移动端优化：防止缩放时视角飘走
-    // 由于禁用了自动缩放，我们需要手动处理触摸缩放
-    // 但保留触摸配置以便 OrbitControls 能正确处理旋转和平移
+    // 🔧 双指只缩放，不平移，防止焦点漂移
     this.controls.touches = {
       ONE: THREE.TOUCH.ROTATE, // 单指旋转
-      TWO: THREE.TOUCH.DOLLY_PAN, // 双指缩放+平移（防止视角飘走）
+      TWO: THREE.TOUCH.DOLLY,  // 双指只缩放，不平移
     };
     
     // 立即绑定事件监听器（不延迟，确保事件监听器始终存在）

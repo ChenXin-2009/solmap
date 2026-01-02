@@ -151,9 +151,10 @@ export function equatorialToCartesian(ra: number, dec: number, distance: number)
   const raRad = (ra * Math.PI) / 180;
   const decRad = (dec * Math.PI) / 180;
   const distanceAU = distance * LIGHT_YEAR_TO_AU;
+  // 坐标系：X 指向春分点，Y 轴向上（北天极），Z 轴完成右手系
   return {
     x: distanceAU * Math.cos(decRad) * Math.cos(raRad),
-    y: distanceAU * Math.cos(decRad) * Math.sin(raRad),
-    z: distanceAU * Math.sin(decRad),
+    y: distanceAU * Math.sin(decRad),              // Y 轴向上
+    z: -distanceAU * Math.cos(decRad) * Math.sin(raRad),
   };
 }

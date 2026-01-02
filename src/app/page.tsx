@@ -4,6 +4,7 @@
 import React from "react";
 import SolarSystemCanvas3D from "@/components/canvas/3d/SolarSystemCanvas3D";
 import TimeControl from "@/components/TimeControl";
+import StarBrightnessSlider from "@/components/StarBrightnessSlider";
 import { HEADER_CONFIG } from "@/lib/config/visualConfig";
 
 export default function SolarSystemPage() {
@@ -34,6 +35,7 @@ export default function SolarSystemPage() {
           <SolarSystemCanvas3D />
         </div>
         <TimeControl />
+        <StarBrightnessSlider />
       </div>
     </div>
   );

@@ -919,7 +919,8 @@ export default function SolarSystemCanvas3D() {
 
         // 更新多尺度宇宙视图（近邻恒星、银河系）
         if (sceneManagerRef.current) {
-          sceneManagerRef.current.updateMultiScaleView(distanceToSun, deltaTime);
+          const starBrightness = useSolarSystemStore.getState().starBrightness;
+          sceneManagerRef.current.updateMultiScaleView(distanceToSun, deltaTime, starBrightness);
         }
 
         // 渲染顺序：先更新 controls，再渲染场景

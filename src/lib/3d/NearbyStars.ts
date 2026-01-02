@@ -56,11 +56,11 @@ export class NearbyStars {
     
     // 处理每颗恒星
     NEARBY_STARS_DATA.forEach((star, index) => {
-      // 计算 3D 位置
+      // 计算 3D 位置（equatorialToCartesian 已经是 Y 轴向上）
       const pos = equatorialToCartesian(star.ra, star.dec, star.distance);
       this.starPositions[index * 3] = pos.x;
-      this.starPositions[index * 3 + 1] = pos.z; // Y 轴向上
-      this.starPositions[index * 3 + 2] = pos.y;
+      this.starPositions[index * 3 + 1] = pos.y;
+      this.starPositions[index * 3 + 2] = pos.z;
       
       // 设置颜色
       const color = new THREE.Color(star.color);
@@ -97,6 +97,7 @@ export class NearbyStars {
     const material = new THREE.ShaderMaterial({
       uniforms: {
         uOpacity: { value: 0 },
+        uBrightness: { value: 1.0 },  // 亮度调整参数
         uTime: { value: 0 },
         uTwinkleEnabled: { value: NEARBY_STARS_CONFIG.twinkleEnabled ? 1.0 : 0.0 },
         uTwinkleIntensity: { value: NEARBY_STARS_CONFIG.twinkleIntensity },
@@ -106,6 +107,7 @@ export class NearbyStars {
         attribute vec3 color;
         varying vec3 vColor;
         varying float vSize;
+        varying float vOriginalSize;
         uniform float uTime;
         uniform float uTwinkleEnabled;
         uniform float uTwinkleIntensity;
@@ -117,6 +119,7 @@ export class NearbyStars {
         
         void main() {
           vColor = color;
+          vOriginalSize = size;
           
           // 闪烁效果
           float twinkle = 1.0;
@@ -140,7 +143,64 @@ export class NearbyStars {
       fragmentShader: `
         varying vec3 vColor;
         varying float vSize;
+        varying float vOriginalSize;
         uniform float uOpacity;
+        uniform float uBrightness;
+        
+        // RGB 转 HSL
+        vec3 rgb2hsl(vec3 c) {
+          float maxC = max(max(c.r, c.g), c.b);
+          float minC = min(min(c.r, c.g), c.b);
+          float l = (maxC + minC) / 2.0;
+          
+          if (maxC == minC) {
+            return vec3(0.0, 0.0, l);
+          }
+          
+          float d = maxC - minC;
+          float s = l > 0.5 ? d / (2.0 - maxC - minC) : d / (maxC + minC);
+          
+          float h;
+          if (maxC == c.r) {
+            h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+          } else if (maxC == c.g) {
+            h = (c.b - c.r) / d + 2.0;
+          } else {
+            h = (c.r - c.g) / d + 4.0;
+          }
+          h /= 6.0;
+          
+          return vec3(h, s, l);
+        }
+        
+        // HSL 转 RGB
+        float hue2rgb(float p, float q, float t) {
+          if (t < 0.0) t += 1.0;
+          if (t > 1.0) t -= 1.0;
+          if (t < 1.0/6.0) return p + (q - p) * 6.0 * t;
+          if (t < 1.0/2.0) return q;
+          if (t < 2.0/3.0) return p + (q - p) * (2.0/3.0 - t) * 6.0;
+          return p;
+        }
+        
+        vec3 hsl2rgb(vec3 hsl) {
+          float h = hsl.x;
+          float s = hsl.y;
+          float l = hsl.z;
+          
+          if (s == 0.0) {
+            return vec3(l, l, l);
+          }
+          
+          float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+          float p = 2.0 * l - q;
+          
+          float r = hue2rgb(p, q, h + 1.0/3.0);
+          float g = hue2rgb(p, q, h);
+          float b = hue2rgb(p, q, h - 1.0/3.0);
+          
+          return vec3(r, g, b);
+        }
         
         void main() {
           // 圆形点
@@ -149,15 +209,58 @@ export class NearbyStars {
           
           if (dist > 0.5) discard;
           
-          // 柔和边缘 + 强烈光晕
-          float core = 1.0 - smoothstep(0.0, 0.15, dist);
-          float glow = 1.0 - smoothstep(0.1, 0.5, dist);
-          float alpha = core + glow * 0.6;
+          // 核心白点和光晕
+          float core = 1.0 - smoothstep(0.0, 0.05, dist);
+          float glow = 1.0 - smoothstep(0.03, 0.5, dist);
+          
+          // 四芒星光芒（亮星）- 使用 smoothstep 避免锯齿
+          float spikes = 0.0;
+          if (vSize > 5.0) {
+            vec2 absCoord = abs(center);
+            
+            // 使用 smoothstep 实现平滑边缘
+            float width1 = 0.02 + dist * 0.1;
+            float width2 = 0.01 + dist * 0.05;
+            
+            // 水平和垂直 spike
+            float spike1 = smoothstep(width1, 0.0, absCoord.x) * smoothstep(0.5, 0.0, absCoord.y);
+            float spike2 = smoothstep(width1, 0.0, absCoord.y) * smoothstep(0.5, 0.0, absCoord.x);
+            
+            // 45度旋转的 spike
+            vec2 rotCoord = vec2(
+              abs(center.x * 0.707 + center.y * 0.707),
+              abs(center.x * 0.707 - center.y * 0.707)
+            );
+            float spike3 = smoothstep(width2, 0.0, rotCoord.x) * smoothstep(0.5, 0.0, rotCoord.y);
+            float spike4 = smoothstep(width2, 0.0, rotCoord.y) * smoothstep(0.5, 0.0, rotCoord.x);
+            
+            float spikeIntensity = min((vSize - 5.0) / 10.0, 1.0);
+            spikes = (spike1 + spike2) * spikeIntensity * 0.6 + (spike3 + spike4) * spikeIntensity * 0.3;
+          }
+          
+          float alpha = core + glow * 0.5 + spikes;
+          
+          // 非线性亮度调整：暗星增亮更多，亮星增亮更少
+          float sizeNormalized = clamp((vOriginalSize - 0.5) / 8.0, 0.0, 1.0);
+          
+          // 计算亮度增益指数：暗星指数大（4.0），亮星指数小（1.0）
+          float exponent = 4.0 - sizeNormalized * 3.0;
+          
+          // 应用非线性亮度调整
+          float brightnessMultiplier = pow(uBrightness, exponent);
+          
+          // 使用 HSL 调整亮度，保持饱和度
+          vec3 hsl = rgb2hsl(vColor);
+          float newL = clamp(hsl.z * brightnessMultiplier, 0.0, 1.0);
+          vec3 adjustedColor = hsl2rgb(vec3(hsl.x, hsl.y, newL));
           
           // 中心更亮
-          float brightness = 1.0 + core * 2.0;
+          vec3 finalColor = mix(adjustedColor, vec3(1.0), core * 0.5);
           
-          gl_FragColor = vec4(vColor * brightness, alpha * uOpacity);
+          // 透明度也随亮度调整
+          float finalAlpha = alpha * uOpacity * clamp(brightnessMultiplier, 0.2, 3.0);
+          
+          gl_FragColor = vec4(finalColor, finalAlpha);
         }
       `,
       transparent: true,
@@ -205,7 +308,7 @@ export class NearbyStars {
   /**
    * 更新渲染（每帧调用）
    */
-  update(cameraDistance: number, deltaTime: number): void {
+  update(cameraDistance: number, deltaTime: number, starBrightness: number = 1.0): void {
     this.time += deltaTime * NEARBY_STARS_CONFIG.twinkleSpeed;
     
     // 计算目标透明度
@@ -228,13 +331,14 @@ export class NearbyStars {
     if (this.pointCloud) {
       const material = this.pointCloud.material as THREE.ShaderMaterial;
       material.uniforms.uOpacity.value = this.currentOpacity;
+      material.uniforms.uBrightness.value = starBrightness;
       material.uniforms.uTime.value = this.time;
     }
     
-    // 更新球体
+    // 更新球体（球体使用简单的透明度调整）
     this.spheres.forEach((sphere) => {
       const material = sphere.material as THREE.MeshBasicMaterial;
-      material.opacity = this.currentOpacity;
+      material.opacity = this.currentOpacity * starBrightness;
     });
   }
 

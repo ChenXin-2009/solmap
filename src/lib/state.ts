@@ -43,6 +43,10 @@ export interface SolarSystemState {
   lang: Language;               // 当前语言
   setLang: (lang: Language) => void; // 切换语言
 
+  // ========== 恒星亮度 ==========
+  starBrightness: number;       // 恒星亮度 (0-2, 1为默认)
+  setStarBrightness: (brightness: number) => void;
+
   // ========== 操作方法 ==========
   setCurrentTime: (date: Date) => void;
   togglePlayPause: () => void;
@@ -88,6 +92,13 @@ export const useSolarSystemStore = create<SolarSystemState>((set, get) => {
     // ========== 语言 ==========
     lang: 'zh', // 默认中文
     setLang: (lang: Language) => set({ lang }),
+
+    // ========== 恒星亮度 ==========
+    starBrightness: 1.0, // 默认亮度
+    setStarBrightness: (brightness: number) => {
+      const clampedBrightness = Math.max(0, Math.min(2, brightness));
+      set({ starBrightness: clampedBrightness });
+    },
 
     // ========== 方法 ==========
     setCurrentTime: (date: Date) => {

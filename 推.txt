@@ -8,9 +8,9 @@
 ==================
 git status
 git add .
-git commit -m "Release 4.2.0: 基于gaia adr3星表添加了更多恒星"
+git commit -m "Release 4.3.0: 基于Bright Star Catalogue星表添加了更多恒星，以及名称"
 git checkout main
 git pull origin main
-git tag v4.2.0
+git tag v4.3.0
 git push origin main
-git push origin v4.2.0
+git push origin v4.3.0

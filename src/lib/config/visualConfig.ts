@@ -1189,6 +1189,36 @@ export const TIME_SLIDER_CONFIG = {
 };
 
 /**
+ * 恒星亮度滑块组件配置
+ * 
+ * 样式配置直接使用 TIME_SLIDER_CONFIG 保持一致
+ * 这里只配置亮度范围和显示条件
+ */
+export const STAR_BRIGHTNESS_SLIDER_CONFIG = {
+  // ==================== 亮度范围配置 ====================
+  
+  /** 最小亮度 */
+  minBrightness: 0,
+  
+  /** 最大亮度 */
+  maxBrightness: 2,
+  
+  /** 默认亮度 */
+  defaultBrightness: 1,
+  
+  // ==================== 显示配置 ====================
+  
+  /** 开始显示的相机距离（AU）- 时间控件隐藏后显示 */
+  showStartDistance: 3000,
+  
+  /** 完全显示的相机距离（AU） */
+  showFullDistance: 5000,
+  
+  /** 底部偏移（像素） */
+  bottomOffset: 30,
+};
+
+/**
  * 时间控件组件配置
  * 
  * 控制底部时间显示区域的样式

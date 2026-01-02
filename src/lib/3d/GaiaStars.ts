@@ -5,41 +5,43 @@
  * 数据格式：每颗恒星 24 字节 (6 x float32)
  * [x, y, z, mag, bp_rp, padding]
  * 坐标单位：parsec
+ * 
+ * 分为两组渲染：
+ * - 亮星（mag < 4）：在太阳系尺度就可见
+ * - 普通星：远距离才显示
  */
 
 import * as THREE from 'three';
-import { SCALE_VIEW_CONFIG, LIGHT_YEAR_TO_AU, PARSEC_TO_AU } from '../config/galaxyConfig';
+import { SCALE_VIEW_CONFIG, PARSEC_TO_AU } from '../config/galaxyConfig';
 
 // Gaia 恒星配置
 export const GAIA_STARS_CONFIG = {
   enabled: true,
   dataPath: '/data/gaia/gaia_gdr3-39aea62e-e77a-11f0-a3b5-bc97e148b76b-O-result.vot.bin',
-  basePointSize: 6.0,        // 基础点大小（增大）
-  brightnessScale: 2.0,      // 亮度缩放（增大）
-  minPointSize: 2.0,         // 最小点大小（像素）
-  maxPointSize: 15.0,        // 最大点大小（像素）
+  basePointSize: 1.0,         // 基础点大小（减小）
+  brightnessScale: 5.0,       // 亮度缩放（增大，让亮星更突出）
+  minPointSize: 1.0,          // 最小点大小
+  maxPointSize: 35.0,         // 最大点大小
+  // 亮星阈值（仍用于内部分组，但不再提前显示）
+  brightStarMagThreshold: 4.0,
 };
 
 export class GaiaStars {
   private group: THREE.Group;
-  private pointCloud: THREE.Points | null = null;
-  private currentOpacity: number = 0;
-  private targetOpacity: number = 0;
-  private isVisible: boolean = false;
+  private brightStarsCloud: THREE.Points | null = null;  // 亮星
+  private normalStarsCloud: THREE.Points | null = null;  // 普通星
+  private brightStarsOpacity: number = 0;
+  private normalStarsOpacity: number = 0;
   private isLoaded: boolean = false;
   private starCount: number = 0;
+  private brightStarCount: number = 0;
 
   constructor() {
     this.group = new THREE.Group();
     this.group.name = 'GaiaStars';
-    this.group.visible = false;
-    
     this.loadData();
   }
 
-  /**
-   * 加载 Gaia 二进制数据
-   */
   private async loadData(): Promise<void> {
     try {
       console.log('[GaiaStars] 开始加载数据...');
@@ -51,66 +53,99 @@ export class GaiaStars {
       const buffer = await response.arrayBuffer();
       const stars = new Float32Array(buffer);
       
-      // 每颗恒星 6 个 float32
       this.starCount = Math.floor(stars.length / 6);
       console.log(`[GaiaStars] 加载了 ${this.starCount} 颗恒星`);
       
-      // 创建数组
-      const positions = new Float32Array(this.starCount * 3);
-      const colors = new Float32Array(this.starCount * 3);
-      const sizes = new Float32Array(this.starCount);
-      
+      // 先统计亮星数量
+      let brightCount = 0;
       for (let i = 0; i < this.starCount; i++) {
-        const idx = i * 6;
-        const x = stars[idx];     // parsec
-        const y = stars[idx + 1]; // parsec
-        const z = stars[idx + 2]; // parsec
-        const mag = stars[idx + 3];     // G 波段星等
-        const bpRp = stars[idx + 4];    // 颜色指数
-        
-        // 调试：记录前几颗恒星的数据
-        if (i < 5) {
-          console.log(`[GaiaStars] 恒星 ${i}: x=${x}, y=${y}, z=${z}, mag=${mag}, bp_rp=${bpRp}`);
-        }
-        
-        // 转换坐标：parsec -> AU
-        positions[i * 3] = x * PARSEC_TO_AU;
-        positions[i * 3 + 1] = z * PARSEC_TO_AU;  // Y 轴向上
-        positions[i * 3 + 2] = y * PARSEC_TO_AU;
-        
-        // 根据 bp_rp 颜色指数计算颜色
-        const color = this.bpRpToColor(bpRp);
-        colors[i * 3] = color.r;
-        colors[i * 3 + 1] = color.g;
-        colors[i * 3 + 2] = color.b;
-        
-        // 根据视星等计算大小
-        // 视星等范围大约 -1.5 (天狼星) 到 10 (肉眼极限)
-        // 星等每差 5 等，亮度差 100 倍
-        // 大幅增加亮度差异
-        const referenceMag = 8; // 参考星等
-        const brightness = Math.pow(2.512, referenceMag - mag);
-        // 使用更激进的缩放，让亮星更大
-        const size = GAIA_STARS_CONFIG.basePointSize * 
-          Math.pow(brightness, 0.5) * GAIA_STARS_CONFIG.brightnessScale;
-        sizes[i] = Math.max(0.3, Math.min(size, 30)); // 扩大范围
-        
-        // 记录亮度范围
-        if (i < 5) {
-          console.log(`[GaiaStars] 恒星 ${i}: brightness=${brightness.toFixed(2)}, size=${sizes[i].toFixed(2)}`);
+        const mag = stars[i * 6 + 3];
+        if (mag < GAIA_STARS_CONFIG.brightStarMagThreshold) {
+          brightCount++;
         }
       }
+      this.brightStarCount = brightCount;
+      console.log(`[GaiaStars] 亮星数量: ${brightCount}`);
+      
+      // 分别创建亮星和普通星数组
+      const brightPositions = new Float32Array(brightCount * 3);
+      const brightColors = new Float32Array(brightCount * 3);
+      const brightSizes = new Float32Array(brightCount);
+      
+      const normalCount = this.starCount - brightCount;
+      const normalPositions = new Float32Array(normalCount * 3);
+      const normalColors = new Float32Array(normalCount * 3);
+      const normalSizes = new Float32Array(normalCount);
+      
+      let brightIdx = 0;
+      let normalIdx = 0;
       
       // 统计星等范围
       let minMag = Infinity, maxMag = -Infinity;
+      
       for (let i = 0; i < this.starCount; i++) {
-        const mag = stars[i * 6 + 3];
+        const idx = i * 6;
+        const x = stars[idx];
+        const y = stars[idx + 1];
+        const z = stars[idx + 2];
+        const mag = stars[idx + 3];
+        const bpRp = stars[idx + 4];
+        
         if (mag < minMag) minMag = mag;
         if (mag > maxMag) maxMag = mag;
+        
+        // 转换坐标：parsec -> AU
+        const posX = x * PARSEC_TO_AU;
+        const posY = z * PARSEC_TO_AU;  // Y 轴向上
+        const posZ = y * PARSEC_TO_AU;
+        
+        // 颜色
+        const color = this.bpRpToColor(bpRp);
+        
+        // 大小：让暗星很小，亮星很大
+        // 星等范围大约 -1.5 到 10
+        // 使用更激进的公式：暗星（mag > 6）很小，亮星（mag < 2）很大
+        const mag_normalized = Math.max(-2, Math.min(mag, 10)); // 限制范围
+        
+        // 使用指数函数，让亮星和暗星差异巨大
+        // mag = -1.5 时 size 最大，mag = 10 时 size 最小
+        const sizeFactor = Math.pow(2.512, (6 - mag_normalized) * 0.8);
+        const size = GAIA_STARS_CONFIG.basePointSize * sizeFactor * GAIA_STARS_CONFIG.brightnessScale;
+        // 暗星最小 0.2，亮星最大 80
+        const clampedSize = Math.max(0.2, Math.min(size, 80));
+        
+        if (mag < GAIA_STARS_CONFIG.brightStarMagThreshold) {
+          // 亮星
+          brightPositions[brightIdx * 3] = posX;
+          brightPositions[brightIdx * 3 + 1] = posY;
+          brightPositions[brightIdx * 3 + 2] = posZ;
+          brightColors[brightIdx * 3] = color.r;
+          brightColors[brightIdx * 3 + 1] = color.g;
+          brightColors[brightIdx * 3 + 2] = color.b;
+          brightSizes[brightIdx] = clampedSize;
+          brightIdx++;
+        } else {
+          // 普通星
+          normalPositions[normalIdx * 3] = posX;
+          normalPositions[normalIdx * 3 + 1] = posY;
+          normalPositions[normalIdx * 3 + 2] = posZ;
+          normalColors[normalIdx * 3] = color.r;
+          normalColors[normalIdx * 3 + 1] = color.g;
+          normalColors[normalIdx * 3 + 2] = color.b;
+          normalSizes[normalIdx] = clampedSize;
+          normalIdx++;
+        }
       }
+      
       console.log(`[GaiaStars] 星等范围: ${minMag.toFixed(2)} 到 ${maxMag.toFixed(2)}`);
       
-      this.createPointCloud(positions, colors, sizes);
+      // 创建两个点云
+      this.brightStarsCloud = this.createPointCloud(brightPositions, brightColors, brightSizes, 96);
+      this.normalStarsCloud = this.createPointCloud(normalPositions, normalColors, normalSizes, 95);
+      
+      this.group.add(this.brightStarsCloud);
+      this.group.add(this.normalStarsCloud);
+      
       this.isLoaded = true;
       console.log('[GaiaStars] 数据加载完成');
       
@@ -119,57 +154,38 @@ export class GaiaStars {
     }
   }
 
-  /**
-   * 将 BP-RP 颜色指数转换为 RGB 颜色
-   * BP-RP 范围大约 -0.5 (蓝) 到 5.0 (红)
-   * 使用更鲜艳的颜色以匹配原有恒星风格
-   */
   private bpRpToColor(bpRp: number): THREE.Color {
-    // 处理无效值
     if (isNaN(bpRp) || bpRp === 0) {
-      return new THREE.Color(0xfff4ea); // 默认类太阳色
+      return new THREE.Color(0xfff4ea);
     }
     
-    // 限制范围
     const clampedBpRp = Math.max(-0.5, Math.min(4.0, bpRp));
     
-    // 使用与 NearbyStars 相似的颜色映射
-    // 基于光谱类型的典型颜色
     if (clampedBpRp < -0.2) {
-      // O 型星 - 蓝色
-      return new THREE.Color(0x9bb0ff);
+      return new THREE.Color(0x9bb0ff); // O 型
     } else if (clampedBpRp < 0.0) {
-      // B 型星 - 蓝白色
-      return new THREE.Color(0xaabfff);
+      return new THREE.Color(0xaabfff); // B 型
     } else if (clampedBpRp < 0.3) {
-      // A 型星 - 白色偏蓝
-      return new THREE.Color(0xcad7ff);
+      return new THREE.Color(0xcad7ff); // A 型
     } else if (clampedBpRp < 0.6) {
-      // F 型星 - 白色
-      return new THREE.Color(0xf8f7ff);
+      return new THREE.Color(0xf8f7ff); // F 型
     } else if (clampedBpRp < 0.9) {
-      // G 型星 - 黄白色（类太阳）
-      return new THREE.Color(0xfff4ea);
+      return new THREE.Color(0xfff4ea); // G 型
     } else if (clampedBpRp < 1.4) {
-      // K 型星 - 橙色
-      return new THREE.Color(0xffd2a1);
+      return new THREE.Color(0xffd2a1); // K 型
     } else if (clampedBpRp < 2.0) {
-      // 早期 M 型星 - 橙红色
-      return new THREE.Color(0xffcc6f);
+      return new THREE.Color(0xffcc6f); // 早期 M 型
     } else {
-      // 晚期 M 型星 - 红色
-      return new THREE.Color(0xff8844);
+      return new THREE.Color(0xff8844); // 晚期 M 型
     }
   }
 
-  /**
-   * 创建点云
-   */
   private createPointCloud(
     positions: Float32Array,
     colors: Float32Array,
-    sizes: Float32Array
-  ): void {
+    sizes: Float32Array,
+    renderOrder: number
+  ): THREE.Points {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -178,6 +194,7 @@ export class GaiaStars {
     const material = new THREE.ShaderMaterial({
       uniforms: {
         uOpacity: { value: 0 },
+        uBrightness: { value: 1.0 },  // 亮度调整参数
         uMinSize: { value: GAIA_STARS_CONFIG.minPointSize },
         uMaxSize: { value: GAIA_STARS_CONFIG.maxPointSize },
       },
@@ -186,18 +203,21 @@ export class GaiaStars {
         attribute vec3 color;
         varying vec3 vColor;
         varying float vSize;
+        varying float vOriginalSize;
         uniform float uMinSize;
         uniform float uMaxSize;
+        uniform float uBrightness;
         
         void main() {
           vColor = color;
+          vOriginalSize = size;
           
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
           gl_Position = projectionMatrix * mvPosition;
           
-          // 点大小：基于距离缩放
           float dist = -mvPosition.z;
-          float baseSize = size * 10.0;
+          // 基础倍数
+          float baseSize = size * 8.0;
           float pointSize = baseSize * (800000.0 / dist);
           gl_PointSize = clamp(pointSize, uMinSize, uMaxSize);
           vSize = gl_PointSize;
@@ -206,45 +226,127 @@ export class GaiaStars {
       fragmentShader: `
         varying vec3 vColor;
         varying float vSize;
+        varying float vOriginalSize;
         uniform float uOpacity;
+        uniform float uBrightness;
+        
+        // RGB 转 HSL
+        vec3 rgb2hsl(vec3 c) {
+          float maxC = max(max(c.r, c.g), c.b);
+          float minC = min(min(c.r, c.g), c.b);
+          float l = (maxC + minC) / 2.0;
+          
+          if (maxC == minC) {
+            return vec3(0.0, 0.0, l);
+          }
+          
+          float d = maxC - minC;
+          float s = l > 0.5 ? d / (2.0 - maxC - minC) : d / (maxC + minC);
+          
+          float h;
+          if (maxC == c.r) {
+            h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+          } else if (maxC == c.g) {
+            h = (c.b - c.r) / d + 2.0;
+          } else {
+            h = (c.r - c.g) / d + 4.0;
+          }
+          h /= 6.0;
+          
+          return vec3(h, s, l);
+        }
+        
+        // HSL 转 RGB
+        float hue2rgb(float p, float q, float t) {
+          if (t < 0.0) t += 1.0;
+          if (t > 1.0) t -= 1.0;
+          if (t < 1.0/6.0) return p + (q - p) * 6.0 * t;
+          if (t < 1.0/2.0) return q;
+          if (t < 2.0/3.0) return p + (q - p) * (2.0/3.0 - t) * 6.0;
+          return p;
+        }
+        
+        vec3 hsl2rgb(vec3 hsl) {
+          float h = hsl.x;
+          float s = hsl.y;
+          float l = hsl.z;
+          
+          if (s == 0.0) {
+            return vec3(l, l, l);
+          }
+          
+          float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+          float p = 2.0 * l - q;
+          
+          float r = hue2rgb(p, q, h + 1.0/3.0);
+          float g = hue2rgb(p, q, h);
+          float b = hue2rgb(p, q, h - 1.0/3.0);
+          
+          return vec3(r, g, b);
+        }
         
         void main() {
           vec2 center = gl_PointCoord - vec2(0.5);
           float dist = length(center);
           
-          if (dist > 0.5) discard;
+          // 使用更平滑的边缘衰减，避免像素化
+          // 高斯衰减：exp(-dist^2 * k)
+          float gaussianFalloff = exp(-dist * dist * 8.0);
           
-          // 基础圆形光晕
-          float core = 1.0 - smoothstep(0.0, 0.12, dist);
-          float glow = 1.0 - smoothstep(0.05, 0.5, dist);
+          // 核心亮点（更小更亮）
+          float core = exp(-dist * dist * 200.0);
           
-          // 四芒星光芒效果（仅对亮星，即大点）
+          // 光晕（平滑衰减）
+          float glow = gaussianFalloff;
+          
+          // 四芒星光芒（亮星）- 使用更平滑的衰减避免锯齿
           float spikes = 0.0;
-          if (vSize > 6.0) {
-            // 计算到四条光芒轴的距离
+          if (vSize > 5.0) {
             vec2 absCoord = abs(center);
-            float spike1 = max(0.0, 1.0 - absCoord.x * 8.0) * max(0.0, 1.0 - absCoord.y * 25.0);
-            float spike2 = max(0.0, 1.0 - absCoord.y * 8.0) * max(0.0, 1.0 - absCoord.x * 25.0);
             
-            // 45度方向的光芒
+            // 使用二次衰减而非指数，更平滑
+            // spike 宽度随距离中心增加而变窄
+            float width1 = 0.02 + dist * 0.1;  // 动态宽度
+            float width2 = 0.01 + dist * 0.05;
+            
+            // 水平和垂直 spike
+            float spike1 = smoothstep(width1, 0.0, absCoord.x) * smoothstep(0.5, 0.0, absCoord.y);
+            float spike2 = smoothstep(width1, 0.0, absCoord.y) * smoothstep(0.5, 0.0, absCoord.x);
+            
+            // 45度旋转的 spike
             vec2 rotCoord = vec2(
               abs(center.x * 0.707 + center.y * 0.707),
               abs(center.x * 0.707 - center.y * 0.707)
             );
-            float spike3 = max(0.0, 1.0 - rotCoord.x * 10.0) * max(0.0, 1.0 - rotCoord.y * 30.0);
-            float spike4 = max(0.0, 1.0 - rotCoord.y * 10.0) * max(0.0, 1.0 - rotCoord.x * 30.0);
+            float spike3 = smoothstep(width2, 0.0, rotCoord.x) * smoothstep(0.5, 0.0, rotCoord.y);
+            float spike4 = smoothstep(width2, 0.0, rotCoord.y) * smoothstep(0.5, 0.0, rotCoord.x);
             
-            // 光芒强度随大小增加
-            float spikeIntensity = (vSize - 6.0) / 10.0;
-            spikes = (spike1 + spike2 + spike3 * 0.5 + spike4 * 0.5) * spikeIntensity * 0.8;
+            float spikeIntensity = min((vSize - 5.0) / 10.0, 1.0);
+            spikes = (spike1 + spike2) * spikeIntensity * 0.6 + (spike3 + spike4) * spikeIntensity * 0.3;
           }
           
-          float alpha = core + glow * 0.5 + spikes;
+          float alpha = core + glow * 0.4 + spikes;
           
-          // 中心更亮
-          float brightness = 1.0 + core * 2.5;
+          // 边缘完全透明
+          if (alpha < 0.001) discard;
           
-          gl_FragColor = vec4(vColor * brightness, alpha * uOpacity);
+          // 非线性亮度调整：暗星增亮更多，亮星增亮更少
+          float sizeNormalized = clamp((vOriginalSize - 0.2) / 40.0, 0.0, 1.0);
+          float exponent = 4.0 - sizeNormalized * 3.0;
+          float brightnessMultiplier = pow(uBrightness, exponent);
+          
+          // 使用 HSL 调整亮度，保持饱和度
+          vec3 hsl = rgb2hsl(vColor);
+          float newL = clamp(hsl.z * brightnessMultiplier, 0.0, 1.0);
+          vec3 adjustedColor = hsl2rgb(vec3(hsl.x, hsl.y, newL));
+          
+          // 中心更亮（白色叠加）
+          vec3 finalColor = mix(adjustedColor, vec3(1.0), core * 0.6);
+          
+          // 透明度也随亮度调整
+          float finalAlpha = alpha * uOpacity * clamp(brightnessMultiplier, 0.2, 3.0);
+          
+          gl_FragColor = vec4(finalColor, finalAlpha);
         }
       `,
       transparent: true,
@@ -252,70 +354,66 @@ export class GaiaStars {
       blending: THREE.AdditiveBlending,
     });
     
-    this.pointCloud = new THREE.Points(geometry, material);
-    this.pointCloud.frustumCulled = false;
-    this.pointCloud.renderOrder = 95; // 在近邻恒星之前渲染
-    this.group.add(this.pointCloud);
+    const points = new THREE.Points(geometry, material);
+    points.frustumCulled = false;
+    points.renderOrder = renderOrder;
+    return points;
   }
 
-  /**
-   * 更新渲染
-   */
-  update(cameraDistance: number, deltaTime: number): void {
+  update(cameraDistance: number, deltaTime: number, starBrightness: number = 1.0): void {
     if (!this.isLoaded) return;
     
-    // 计算目标透明度（与近邻恒星相同的显示范围）
-    this.calculateTargetOpacity(cameraDistance);
+    // 所有恒星使用相同的显示逻辑（与近邻恒星相同）
+    const config = SCALE_VIEW_CONFIG;
+    let targetOpacity = 0;
+    
+    if (cameraDistance < config.nearbyStarsShowStart) {
+      targetOpacity = 0;
+    } else if (cameraDistance < config.nearbyStarsShowFull) {
+      const range = config.nearbyStarsShowFull - config.nearbyStarsShowStart;
+      targetOpacity = (cameraDistance - config.nearbyStarsShowStart) / range;
+    } else if (cameraDistance < config.nearbyStarsFadeStart) {
+      targetOpacity = 1;
+    } else if (cameraDistance < config.nearbyStarsFadeEnd) {
+      const range = config.nearbyStarsFadeEnd - config.nearbyStarsFadeStart;
+      targetOpacity = 1 - (cameraDistance - config.nearbyStarsFadeStart) / range;
+    } else {
+      targetOpacity = 0;
+    }
     
     // 平滑过渡
     const fadeSpeed = 2.0;
-    this.currentOpacity += (this.targetOpacity - this.currentOpacity) * Math.min(deltaTime * fadeSpeed, 1);
+    this.brightStarsOpacity += (targetOpacity - this.brightStarsOpacity) * Math.min(deltaTime * fadeSpeed, 1);
+    this.normalStarsOpacity += (targetOpacity - this.normalStarsOpacity) * Math.min(deltaTime * fadeSpeed, 1);
     
-    // 更新可见性
-    const shouldBeVisible = this.currentOpacity > 0.01;
-    if (shouldBeVisible !== this.isVisible) {
-      this.isVisible = shouldBeVisible;
-      this.group.visible = this.isVisible;
+    // 更新点云
+    if (this.brightStarsCloud) {
+      this.brightStarsCloud.visible = this.brightStarsOpacity > 0.01;
+      const mat = this.brightStarsCloud.material as THREE.ShaderMaterial;
+      mat.uniforms.uOpacity.value = this.brightStarsOpacity;
+      mat.uniforms.uBrightness.value = starBrightness;
     }
     
-    if (!this.isVisible || !this.pointCloud) return;
-    
-    // 更新透明度
-    const material = this.pointCloud.material as THREE.ShaderMaterial;
-    material.uniforms.uOpacity.value = this.currentOpacity;
-  }
-
-  /**
-   * 计算目标透明度
-   */
-  private calculateTargetOpacity(cameraDistance: number): void {
-    const config = SCALE_VIEW_CONFIG;
-    
-    // 使用与近邻恒星相同的显示范围
-    if (cameraDistance < config.nearbyStarsShowStart) {
-      this.targetOpacity = 0;
-    } else if (cameraDistance < config.nearbyStarsShowFull) {
-      const range = config.nearbyStarsShowFull - config.nearbyStarsShowStart;
-      this.targetOpacity = (cameraDistance - config.nearbyStarsShowStart) / range;
-    } else if (cameraDistance < config.nearbyStarsFadeStart) {
-      this.targetOpacity = 1;
-    } else if (cameraDistance < config.nearbyStarsFadeEnd) {
-      const range = config.nearbyStarsFadeEnd - config.nearbyStarsFadeStart;
-      this.targetOpacity = 1 - (cameraDistance - config.nearbyStarsFadeStart) / range;
-    } else {
-      this.targetOpacity = 0;
+    if (this.normalStarsCloud) {
+      this.normalStarsCloud.visible = this.normalStarsOpacity > 0.01;
+      const mat = this.normalStarsCloud.material as THREE.ShaderMaterial;
+      mat.uniforms.uOpacity.value = this.normalStarsOpacity;
+      mat.uniforms.uBrightness.value = starBrightness;
     }
   }
 
   getGroup(): THREE.Group { return this.group; }
-  getOpacity(): number { return this.currentOpacity; }
-  getIsVisible(): boolean { return this.isVisible; }
   getStarCount(): number { return this.starCount; }
+  getBrightStarCount(): number { return this.brightStarCount; }
 
   dispose(): void {
-    if (this.pointCloud) {
-      this.pointCloud.geometry.dispose();
-      (this.pointCloud.material as THREE.Material).dispose();
+    if (this.brightStarsCloud) {
+      this.brightStarsCloud.geometry.dispose();
+      (this.brightStarsCloud.material as THREE.Material).dispose();
+    }
+    if (this.normalStarsCloud) {
+      this.normalStarsCloud.geometry.dispose();
+      (this.normalStarsCloud.material as THREE.Material).dispose();
     }
     this.group.clear();
   }
