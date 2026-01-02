@@ -15,8 +15,8 @@ export const SCALE_VIEW_CONFIG = {
   nearbyStarsShowFull: LIGHT_YEAR_TO_AU,
   nearbyStarsFadeStart: 500 * LIGHT_YEAR_TO_AU,
   nearbyStarsFadeEnd: 1000 * LIGHT_YEAR_TO_AU,
-  galaxyShowStart: 100 * LIGHT_YEAR_TO_AU,
-  galaxyShowFull: 500 * LIGHT_YEAR_TO_AU,
+  galaxyShowStart: 1000 * LIGHT_YEAR_TO_AU,    // 1000光年开始显示
+  galaxyShowFull: 2000 * LIGHT_YEAR_TO_AU,    // 2000光年完全显示
   milkyWayBackgroundFadeStart: 50 * LIGHT_YEAR_TO_AU,
   milkyWayBackgroundFadeEnd: 200 * LIGHT_YEAR_TO_AU,
 };
@@ -44,8 +44,34 @@ export const GALAXY_CONFIG = {
   diskThickness: 300,
   sunDistanceFromCenter: 26000,
   topViewTexturePath: '/textures/planets/MilkyWayTop_Gaia_2100.jpg',
-  topViewOpacity: 0.6,
+  topViewOpacity: 1.0,
   topViewScale: 1.0,
+  // 立体厚度配置
+  layerCount: 50,             // 层数（更多层减少分层感）
+  layerThicknessLY: 2000,     // 总厚度（光年）
+  layerOpacity: 0.03,         // 每层透明度
+  bulgeFactor: 2,             // 凸起强度系数（相对于厚度）
+  bulgeExponent: 4,           // 圆盘区域衰减指数
+  coreRadius: 0.15,           // 核球半径（相对于银河系半径）
+  coreThicknessFactor: 1.001,   // 核球厚度倍数
+  diskMinThickness: 0.2,     // 圆盘最小厚度（相对于最大厚度）
+  layerJitter: 5,             // 层高度随机抖动（减少分层感）
+  coreBrightness: 1,          // 核心亮度倍数
+  // 翘曲配置（银河系边缘一侧向上翘，另一侧向下弯）
+  warpEnabled: true,          // 是否启用翘曲
+  warpAmplitude: 0.08,        // 翘曲幅度（相对于半径）
+  warpStartRadius: 0.4,       // 翘曲开始位置（相对于半径）
+  warpAngle: 0,               // 翘曲方向角度（度）
+  // 侧视图配置
+  sideViewEnabled: true,      // 是否启用侧视图
+  sideViewTexturePath: '/textures/planets/MilkyWaySide_Gaia_5000_2.jpg',
+  sideViewOpacity: 0.03,       // 侧视图透明度
+  sideViewCount: 30,           // 侧视图数量（均匀分布）
+  // 旋转配置（度）
+  rotationX: -90,
+  rotationY: 30,
+  rotationZ: 90,
+  // 其他配置
   particleCount: 100000,
   particleBaseSize: 1.0,
   coreColor: '#fffaf0',
