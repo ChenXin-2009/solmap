@@ -128,7 +128,7 @@ export class CameraController {
     // 🔧 双指只缩放，不平移，防止焦点漂移
     this.controls.touches = {
       ONE: THREE.TOUCH.ROTATE, // 单指旋转
-      TWO: THREE.TOUCH.DOLLY,  // 双指只缩放，不平移
+      TWO: THREE.TOUCH.DOLLY_ROTATE,  // 双指缩放+旋转，不平移
     };
     
     // 立即绑定事件监听器（不延迟，确保事件监听器始终存在）
