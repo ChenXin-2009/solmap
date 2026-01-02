@@ -8,9 +8,9 @@
 ==================
 git status
 git add .
-git commit -m "Release 4.1.2: 优化银河系视图性能"
+git commit -m "Release 4.2.0: 基于gaia adr3星表添加了更多恒星"
 git checkout main
 git pull origin main
-git tag v4.1.2
+git tag v4.2.0
 git push origin main
-git push origin v4.1.2
+git push origin v4.2.0

@@ -18,6 +18,7 @@ import * as THREE from 'three';
 import { VIEW_SETTINGS } from '../config/cameraConfig';
 import { NearbyStars } from './NearbyStars';
 import { GalaxyRenderer } from './GalaxyRenderer';
+import { GaiaStars } from './GaiaStars';
 import { SCALE_VIEW_CONFIG, NEARBY_STARS_CONFIG, GALAXY_CONFIG } from '../config/galaxyConfig';
 
 // 银河系背景图片路径（圆柱投影/equirectangular）
@@ -48,6 +49,7 @@ export class SceneManager {
   
   // 多尺度宇宙视图组件
   private nearbyStars: NearbyStars | null = null;
+  private gaiaStars: GaiaStars | null = null;
   private galaxyRenderer: GalaxyRenderer | null = null;
   private skyboxOpacity: number = 1;
   private skyboxTargetOpacity: number = 1;
@@ -111,6 +113,10 @@ export class SceneManager {
       this.nearbyStars = new NearbyStars();
       this.scene.add(this.nearbyStars.getGroup());
     }
+    
+    // 初始化 Gaia 恒星
+    this.gaiaStars = new GaiaStars();
+    this.scene.add(this.gaiaStars.getGroup());
     
     // 初始化银河系渲染器
     if (GALAXY_CONFIG.enabled) {
@@ -225,6 +231,11 @@ export class SceneManager {
     // 更新近邻恒星
     if (this.nearbyStars) {
       this.nearbyStars.update(cameraDistance, deltaTime);
+    }
+    
+    // 更新 Gaia 恒星
+    if (this.gaiaStars) {
+      this.gaiaStars.update(cameraDistance, deltaTime);
     }
     
     // 更新银河系
@@ -345,6 +356,11 @@ export class SceneManager {
     if (this.nearbyStars) {
       this.nearbyStars.dispose();
       this.nearbyStars = null;
+    }
+    
+    if (this.gaiaStars) {
+      this.gaiaStars.dispose();
+      this.gaiaStars = null;
     }
     
     if (this.galaxyRenderer) {

@@ -11,14 +11,15 @@ export const PARSEC_TO_AU = 206265;
 export const SCALE_VIEW_CONFIG = {
   solarSystemFadeStart: 500,
   solarSystemFadeEnd: 2000,
-  nearbyStarsShowStart: 30000,
-  nearbyStarsShowFull: LIGHT_YEAR_TO_AU,
+  nearbyStarsShowStart: 30000,                  // 系外恒星开始显示（AU）
+  nearbyStarsShowFull: LIGHT_YEAR_TO_AU,        // 系外恒星完全显示（1光年）
   nearbyStarsFadeStart: 500 * LIGHT_YEAR_TO_AU,
   nearbyStarsFadeEnd: 1000 * LIGHT_YEAR_TO_AU,
-  galaxyShowStart: 1000 * LIGHT_YEAR_TO_AU,    // 1000光年开始显示
-  galaxyShowFull: 2000 * LIGHT_YEAR_TO_AU,    // 2000光年完全显示
-  milkyWayBackgroundFadeStart: 50 * LIGHT_YEAR_TO_AU,
-  milkyWayBackgroundFadeEnd: 200 * LIGHT_YEAR_TO_AU,
+  galaxyShowStart: 1000 * LIGHT_YEAR_TO_AU,     // 1000光年开始显示
+  galaxyShowFull: 2000 * LIGHT_YEAR_TO_AU,      // 2000光年完全显示
+  // 银河系背景（圆柱投影）在系外恒星显示时淡出
+  milkyWayBackgroundFadeStart: 30000,           // 与系外恒星同时开始淡出
+  milkyWayBackgroundFadeEnd: LIGHT_YEAR_TO_AU,  // 1光年时完全隐藏
 };
 
 // ==================== 近邻恒星配置 ====================
